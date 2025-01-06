@@ -1,7 +1,0 @@
-[
-{
-  "directory": "/home/hzj/coroutine/build",
-  "command": "/usr/bin/c++   -I/home/hzj/coroutine/./include -I/home/hzj/coroutine/./mem_pool/include -I/home/hzj/coroutine/./context  -g   -std=c++17 -Wall -g -o CMakeFiles/Coroutine.dir/main.cpp.o -c /home/hzj/coroutine/main.cpp",
-  "file": "/home/hzj/coroutine/main.cpp"
-}
-]

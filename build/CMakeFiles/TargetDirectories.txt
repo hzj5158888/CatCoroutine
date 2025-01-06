@@ -1,3 +1,0 @@
-/home/hzj/coroutine/build/CMakeFiles/rebuild_cache.dir
-/home/hzj/coroutine/build/CMakeFiles/edit_cache.dir
-/home/hzj/coroutine/build/CMakeFiles/Coroutine.dir
