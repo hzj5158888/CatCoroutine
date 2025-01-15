@@ -45,6 +45,13 @@
         "streambuf": "cpp",
         "typeinfo": "cpp",
         "thread": "cpp",
-        "chrono": "cpp"
+        "chrono": "cpp",
+        "ratio": "cpp",
+        "compare": "cpp",
+        "concepts": "cpp",
+        "ctime": "cpp",
+        "numbers": "cpp",
+        "semaphore": "cpp",
+        "stop_token": "cpp"
     }
 }

@@ -1,20 +1,39 @@
 #include <iostream>
-#include <cstdint>
-#include <vector>
-#include <memory>
-#include <algorithm>
-#include <string>
 #include <thread>
+#include <memory>
+#include <map>
+#include <deque>
+#include <stack>
+#include <unordered_map>
+#include <functional>
+#include <utility>
 
-#include "./mem_pool/include/MemoryPool.h"
-#include "./include/coroutine.hpp"
+#include "./include/Coroutine.h"
+#include "./include/CoPrivate.h"
+
+void t(int a, int b, int c)
+{
+    std::cout << a << ' ' << b << ' ' << c << std::endl;
+}
+
+void test(void * arg)
+{
+    std::cout << "test, arg=" << arg << std::endl;
+}
 
 int main()
 {
-    co::Co<int> c{[]() -> void {}, 1, 2};
+	co::init();
 
-    co::suspend();
-    co::yield(12);
+    std::cout << "main entry" << std::endl;
+
+    std::cout << sizeof (std::stack<int>) << std::endl;
+    std::cout << sizeof (std::string) << std::endl;
+    std::cout << sizeof (std::string_view) << std::endl;
+
+    co::Co c{t, 1, 2, -1};
+	co::Co{t, 1, 2, 3}.await();
+	c.await();
 
     return 0;
 }
