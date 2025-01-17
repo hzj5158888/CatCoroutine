@@ -21,13 +21,13 @@ namespace std {
 	private:
 		sem_t sem{};
 	public:
-		explicit counting_semaphore(uint32_t count = 0);
+		explicit inline counting_semaphore(uint32_t count = 0);
 		~counting_semaphore();
 		inline void wait();
 		inline void signal();
 	};
 
-	inline counting_semaphore::counting_semaphore(uint32_t count)
+	counting_semaphore::counting_semaphore(uint32_t count)
 	{
 		int res = sem_init(&sem, 0, count);
 		if (res != 0)

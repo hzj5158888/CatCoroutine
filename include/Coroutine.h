@@ -6,6 +6,7 @@
 #include <memory>
 #include <future>
 #include <exception>
+#include <thread>
 
 #include "../utils/include/Invoker.h"
 #include "../utils/include/utils.h"
@@ -17,9 +18,9 @@ namespace co {
 	constexpr static uint64_t MAIN_CO_ID = 1;
     constexpr static uint64_t SSO_SIZE = 96; // 小对象大小
 	constexpr static uint64_t MAX_YIELD_BUFFER_CAPACITY = 64; // 产出缓存最大值，必须是2的幂
-	constexpr static uint64_t MAX_STACK_SIZE = 1024 * 1024 * 8; // 8MB
+	constexpr static uint64_t MAX_STACK_SIZE = 1024 * 1024 * 2; // 2MB
 	constexpr static uint64_t STATIC_STK_NUM = 16;
-	constexpr static uint16_t CPU_CORE = __CPU_CORE__;
+	constexpr static uint16_t CPU_CORE = 1;
 	static_assert(CPU_CORE > 0);
 
 	class Co_UnInitialization_Exception : public std::exception
@@ -50,26 +51,28 @@ namespace co {
 	void * create(void * invoker, int nice);
     void destroy(void * handle);
 	void await(void * handle);
-    void suspend();
+    void yield();
 	void init();
 
 	template<int NICE = PRIORITY_NORMAL>
     class Co
     {
     private:
-        void * handle{};
+		void * handle{};
 		static_assert(NICE >= -20 && NICE <= 19);
     public:
-		Co() = delete;
-        Co(const Co & oth) = delete;
 
+		Co() = default;
+        Co(const Co & oth) = delete;
         template<typename Fn, typename... Args> explicit
         Co(Fn && fn, Args &&... args);
-        Co(Co && co) = default;
+        Co(Co && co) noexcept;
         
         ~Co();
     
         void await();
+
+		void swap(Co && co);
     };
 
 	template<int NICE>
@@ -87,8 +90,18 @@ namespace co {
     }
 
 	template<int NICE>
-	Co<NICE>::~Co() { co::destroy(handle); }
+	Co<NICE>::~Co()
+	{
+		if (handle != nullptr)
+			co::destroy(handle);
+	}
 
 ;	template<int NICE>
 	void Co<NICE>::await() { co::await(handle); }
+
+	template<int NICE>
+	void Co<NICE>::swap(Co<NICE> && co) { std::swap(handle, co.handle); }
+
+	template<int NICE>
+	Co<NICE>::Co(Co<NICE> && co) noexcept { swap(std::move(co)); }
 }

@@ -21,6 +21,15 @@ private:
     static_assert(N > 0);
 public:
     RingBuffer() = default;
+	RingBuffer(RingBuffer && buf) noexcept { swap(std::move(buf)); }
+
+	void swap(RingBuffer && buf)
+	{
+		std::swap(m_data, buf.m_data);
+		std::swap(rear, buf.rear);
+		std::swap(front, buf.front);
+		std::swap(m_size, buf.m_size);
+	}
 
     [[nodiscard]] bool empty() const
     {

@@ -28,11 +28,9 @@ void Sem_t::wait()
 	// only running coroutine can use Sem
 	// doesn't need to remove from scheduler
 	auto co = co_ctx::loc->scheduler->running_co;
-	int res = co_ctx::loc->scheduler->interrupt();
-	if (res == CONTEXT_RESTORE)
-		return;
-
+	co_ctx::loc->scheduler->interrupt();
 	co->status = CO_WAITING;
+	co_ctx::loc->scheduler->jump_to_exec();
 }
 
 bool Sem_t::try_wait()

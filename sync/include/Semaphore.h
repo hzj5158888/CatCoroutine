@@ -42,12 +42,13 @@ namespace co {
 		inline Semaphore();
 		inline explicit Semaphore(uint32_t x);
 		inline Semaphore(const Semaphore & sem) = delete;
-		inline Semaphore(Semaphore && sem) = default;
+		inline Semaphore(Semaphore && sem) noexcept ;
 		inline ~Semaphore();
 
 		inline void signal();
 		inline void wait();
 		inline bool try_wait();
+		inline void swap(Semaphore && sem);
 		inline operator int32_t () const;
 	};
 
@@ -58,6 +59,8 @@ namespace co {
 			throw SemaphoreCreateException();
 	}
 
+	Semaphore::Semaphore(Semaphore && sem) noexcept { swap(std::move(sem)); }
+
 	Semaphore::Semaphore(uint32_t x)
 	{
 		handle = sem_create(x);
@@ -65,7 +68,14 @@ namespace co {
 			throw SemaphoreCreateException();
 	}
 
-	Semaphore::~Semaphore() { sem_destroy(handle); handle = nullptr; }
+	Semaphore::~Semaphore()
+	{
+		if (handle == nullptr)
+			return;
+
+		sem_destroy(handle);
+		handle = nullptr;
+	}
 
 	void Semaphore::signal()
 	{
@@ -90,6 +100,8 @@ namespace co {
 
 		return sem_try_wait(handle);
 	}
+
+	void Semaphore::swap(Semaphore && sem) { std::swap(handle, sem.handle); }
 
 	Semaphore::operator int32_t() const { return sem_get_count(handle); }
 }

@@ -17,24 +17,26 @@
 
 struct StackInfo
 {
-	constexpr static std::size_t STACK_ALIGN = 64;
+	constexpr static std::size_t STACK_ALIGN = 16;
 	constexpr static std::size_t STACK_RESERVE = 2 * STACK_ALIGN;
 	constexpr static std::size_t STACK_SIZE = co::MAX_STACK_SIZE + STACK_RESERVE;
 
-	uint8_t stk[STACK_SIZE];
+	uint8_t * stk{};
 	Co_t * co{};
+
+	StackInfo() { stk = reinterpret_cast<uint8_t *>(std::malloc(STACK_SIZE)); }
+	~StackInfo() { std::free(stk); }
 
 	[[nodiscard]] uint8_t * get_stk_ptr() const
 	{
-		void * ptr = (void*)&stk[co::MAX_STACK_SIZE];
-		std::size_t size_remain{STACK_RESERVE};
-		return (uint8_t *)std::align(STACK_ALIGN, STACK_ALIGN, ptr, size_remain);
+		auto * ptr = (uint8_t *)&stk[co::MAX_STACK_SIZE];
+		return align_stk_ptr(ptr);
 	}
 };
 
 struct StackPool
 {
-	StackInfo stk[co::STATIC_STK_NUM];
+	std::array<StackInfo, co::STATIC_STK_NUM> stk{};
 	MemoryPool dyn_stk_pool{};
 
 	spin_lock m_lock{};

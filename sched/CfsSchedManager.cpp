@@ -13,8 +13,8 @@ void CfsSchedManager::apply(Co_t * co)
 	if (co->status == CO_RUNNING) [[unlikely]]
 		throw ApplyReadyCoException();
 	// 协程在调度器中
-	if (co->status == CO_READY && co->ready_self != CoReadyIter{}) [[unlikely]]
-		return;
+	if (co->status == CO_READY && co->scheduler != nullptr) [[unlikely]]
+		assert(false);
 
 	int min_scheduler_idx = 0;
 	uint64_t min_v_runtime = INF;
@@ -31,13 +31,30 @@ void CfsSchedManager::apply(Co_t * co)
 	schedulers[min_scheduler_idx]->apply_ready(co);
 }
 
-void CfsSchedManager::wakeup_from_await(Co_t * co)
+void CfsSchedManager::coroutine_yield(Co_t * yield_co)
 {
-	if (co == nullptr) [[unlikely]]
+	int res = save_context(yield_co->ctx.get_jmp_buf(), &yield_co->ctx.first_full_save);
+	if (res == CONTEXT_RESTORE)
 		return;
 
-	std::lock_guard<spin_lock> lock(co->m_lock);
-	auto caller_q = &co->await_caller;
+	/* update stack size */
+	yield_co->ctx.set_stk_size();
+
+	/* process coroutine */
+	yield_co->scheduler->interrupt();
+	yield_co->scheduler->remove_from_scheduler(yield_co);
+	apply(yield_co);
+	co_ctx::loc->scheduler->jump_to_exec();
+	// never arrive
+}
+
+void CfsSchedManager::wakeup_await_co_all(Co_t * await_callee)
+{
+	if (await_callee == nullptr) [[unlikely]]
+		return;
+
+	std::lock_guard<spin_lock> lock(await_callee->await_lock);
+	auto caller_q = &await_callee->await_caller;
 	while (!caller_q->empty())
 	{
 		auto cur = caller_q->front();

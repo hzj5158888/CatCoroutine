@@ -3,6 +3,7 @@
 #include "../sched/include/CfsSched.h"
 #include "include/Semaphore.h"
 #include "include/Sem_t.h"
+#include "../context/include/Context.h"
 
 namespace co {
 	void * sem_create(uint32_t count)
@@ -23,6 +24,14 @@ namespace co {
 
 	void sem_wait(void * handle)
 	{
+		auto co = co_ctx::loc->scheduler->running_co;
+		int res = save_context(co->ctx.get_jmp_buf(), &co->ctx.first_full_save);
+		if (res == CONTEXT_RESTORE)
+			return;
+
+		/* update stack size */
+		co->ctx.set_stk_size();
+
 		static_cast<Sem_t*>(handle)->wait();
 	}
 

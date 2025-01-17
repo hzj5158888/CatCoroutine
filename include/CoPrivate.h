@@ -35,8 +35,11 @@ struct Co_t
     uint32_t id{co::INVALID_CO_ID};
     std::atomic<uint8_t> status{CO_NEW};
 
-	// 回收锁
+	// 状态锁
 	spin_lock status_lock{};
+
+	// 线程所有权
+	spin_lock stk_active_lock{};
 
 	// 分配器信息
 	MemoryPool * allocator{};
@@ -50,7 +53,7 @@ struct Co_t
 	CoReadyIter ready_self{};
 
 	// await
-	spin_lock m_lock{};
+	spin_lock await_lock{};
 	Co_t * await_callee{}; // await 谁
 	std::queue<Co_t *> await_caller{}; // 谁 await
 
@@ -99,14 +102,14 @@ struct local_t
 	std::thread::id thread_id{};
 	std::unique_ptr<AllocatorGroup> alloc{};
 	std::shared_ptr<CfsScheduler> scheduler{};
-
-	~local_t() { std::cout << "local_t destruct" << std::endl; }
 };
 
 namespace co_ctx
 {
 	extern bool is_init;
+	extern std::unique_ptr<Context> manger_ctx;
 	extern std::shared_ptr<CfsSchedManager> manager;
 	extern std::atomic<uint32_t> coroutine_count;
-	extern thread_local local_t * loc;
+	extern std::vector<Co_t*> co_vec; // debug
+	extern thread_local std::shared_ptr<local_t> loc;
 }

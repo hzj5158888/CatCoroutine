@@ -36,4 +36,11 @@ constexpr std::size_t ceil_pow_2(std::size_t x)
 	return std::size_t(1) << idx;
 }
 
+template<typename T>
+constexpr T * align_stk_ptr(T * ptr)
+{
+	unsigned long mask = (unsigned long)(-1) - 15;
+	return (T*)(((unsigned long)ptr & mask) + 8);
+}
+
 #endif //COROUTINE_UTILS_H

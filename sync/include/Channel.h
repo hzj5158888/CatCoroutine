@@ -49,7 +49,7 @@ namespace co {
 	public:
 		inline Channel() = default;
 		inline Channel(const Channel & chan) = delete;
-		inline Channel(Channel && chan) = default;
+		inline Channel(Channel && chan) = delete;
 		inline ~Channel() { close(); }
 
 		inline void push(const T & x) { push<const T &>(std::forward<const T &>(x)); }

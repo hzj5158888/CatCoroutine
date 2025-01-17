@@ -23,10 +23,8 @@ void StackPool::alloc_dyn_stk_mem(void * &mem_ptr, uint8_t * &stk_ptr, std::size
 {
 	mem_ptr = reinterpret_cast<void*>(dyn_stk_pool.allocate_safe(size + StackInfo::STACK_RESERVE));
 
-	std::size_t tmp{StackInfo::STACK_RESERVE};
-	void * stk_ptr_void = reinterpret_cast<void *>((unsigned long)mem_ptr + size);
-	stk_ptr_void = std::align(StackInfo::STACK_ALIGN, StackInfo::STACK_ALIGN, stk_ptr_void, tmp);
-	stk_ptr = static_cast<uint8_t *>(stk_ptr_void);
+	stk_ptr = reinterpret_cast<uint8_t *>((unsigned long)mem_ptr + size);
+	stk_ptr = align_stk_ptr(stk_ptr);
 }
 
 void StackPool::write_back(StackInfo * info)
@@ -39,25 +37,29 @@ void StackPool::write_back(StackInfo * info)
 	auto ctx = &info->co->ctx;
 	ctx->stk_is_static = false;
 	ctx->static_stk_pool = nullptr;
+	ctx->set_stk_size();
+	ctx->stk_real_bottom = nullptr;
 	if (ctx->stk_dyn == nullptr)
 	{
-		std::size_t stk_size = ctx->stk_size();
+		std::size_t stk_size = ctx->stk_size;
 		alloc_dyn_stk_mem(ctx->stk_dyn_mem, ctx->stk_dyn, stk_size);
 		ctx->stk_dyn_capacity = stk_size;
 		ctx->stk_dyn_alloc = &dyn_stk_pool;
+		ctx->stk_dyn_real_bottom = ctx->stk_dyn;
 		copy_stk(ctx->stk_dyn, info->get_stk_ptr(), stk_size);
-	} else if (ctx->stk_dyn_capacity >= ctx->stk_size())
+	} else if (ctx->stk_dyn_capacity >= ctx->stk_size)
 	{
-		copy_stk(ctx->stk_dyn, info->get_stk_ptr(), ctx->stk_size());
+		copy_stk(ctx->stk_dyn, info->get_stk_ptr(), ctx->stk_size);
 	} else {
 		ctx->stk_dyn_alloc->free_safe(ctx->stk_dyn_mem);
 		ctx->stk_dyn_mem = nullptr;
 		ctx->stk_dyn = nullptr;
 
 		ctx->stk_dyn_alloc = &dyn_stk_pool;
-		ctx->stk_dyn_capacity = 3 * ctx->stk_size() / 2; // 1.5 * ctx->stk_size()
+		ctx->stk_dyn_capacity = 4 * ctx->stk_size / 3; // 1.25 * ctx->stk_size()
 		alloc_dyn_stk_mem(ctx->stk_dyn_mem, ctx->stk_dyn, ctx->stk_dyn_capacity);
-		copy_stk(ctx->stk_dyn, info->get_stk_ptr(), ctx->stk_size());
+		ctx->stk_dyn_real_bottom = ctx->stk_dyn;
+		copy_stk(ctx->stk_dyn, info->get_stk_ptr(), ctx->stk_size);
 	}
 }
 
@@ -89,8 +91,8 @@ uint8_t * StackPool::alloc_static_stk(Co_t * co)
 
 		stk[stk_idx].co = co;
 		running_co.insert({co, stk_idx});
-		if (co->ctx.stk_size() > 0 && co->ctx.stk_dyn != nullptr)
-			copy_stk(stk[stk_idx].get_stk_ptr(), co->ctx.stk_dyn, co->ctx.stk_size());
+		if (co->ctx.stk_size > 0 && co->ctx.stk_dyn != nullptr)
+			copy_stk(stk[stk_idx].get_stk_ptr(), co->ctx.stk_dyn, co->ctx.stk_size);
 
 		setup_co_static_stk(co, true, this);
 		return stk[stk_idx].get_stk_ptr();
@@ -103,13 +105,13 @@ uint8_t * StackPool::alloc_static_stk(Co_t * co)
 	auto co_stack_info = &stk[stk_idx];
 	// write back to old stack
 	write_back(co_stack_info);
-	freed_co.erase(co_stack_info->co);
+	freed_co.erase(freed_co.begin());
 	/* switch to new stack */
 	co_stack_info->co = co;
 	running_co.insert({co, stk_idx});
 	// copy stack data
-	if (co->ctx.stk_size() > 0)
-		copy_stk(co_stack_info->get_stk_ptr(), co->ctx.stk_dyn, co->ctx.stk_size());
+	if (co->ctx.stk_size > 0)
+		copy_stk(co_stack_info->get_stk_ptr(), co->ctx.stk_dyn, co->ctx.stk_size);
 
 	setup_co_static_stk(co, true, this);
 	return co_stack_info->get_stk_ptr();

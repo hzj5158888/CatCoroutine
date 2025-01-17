@@ -10,8 +10,9 @@
 #include "../../include/CoPrivate.h"
 
 
-struct SchedEntity
+class SchedEntity
 {
+public:
 	uint64_t real_runtime{};
 	uint64_t start_exec_timestamp{};
 	uint64_t end_exec_timestamp{};
@@ -39,12 +40,13 @@ struct SchedEntity
 	[[nodiscard]] virtual uint64_t priority() const { return 0; }
 };
 
-struct Scheduler
+class Scheduler
 {
+public:
 	virtual ~Scheduler() = default;
 
 	virtual void run(Co_t * co) {}
-	virtual int32_t interrupt() { return 0; }
+	virtual Co_t * interrupt() { return nullptr; }
 };
 
 #endif //COROUTINE_SCHEDULER_H

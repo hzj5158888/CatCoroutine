@@ -10,15 +10,26 @@
 
 #include "./include/Coroutine.h"
 #include "./include/CoPrivate.h"
+#include "test/include/test.h"
 
 void t(int a, int b, int c)
 {
-    std::cout << a << ' ' << b << ' ' << c << std::endl;
+	for (int i = 0; i < a; i++)
+	{
+		std::cout << "thread id = " << a << std::endl;
+		std::cout << b << ' ' << c << std::endl;
+		std::printf("b=%d, c=%d\n", b, c);
+	}
 }
 
-void test(void * arg)
+void test0()
 {
-    std::cout << "test, arg=" << arg << std::endl;
+	std::vector<co::Co<co::PRIORITY_NORMAL>> vec{};
+	for (int i = 0; i < 128; i++)
+		vec.emplace_back(t, i, 2, 3);
+
+	for (auto & i : vec)
+		i.await();
 }
 
 int main()
@@ -31,9 +42,7 @@ int main()
     std::cout << sizeof (std::string) << std::endl;
     std::cout << sizeof (std::string_view) << std::endl;
 
-    co::Co c{t, 1, 2, -1};
-	co::Co{t, 1, 2, 3}.await();
-	c.await();
+	test();
 
     return 0;
 }

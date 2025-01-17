@@ -1,9 +1,6 @@
-.global switch_context_first_make
-.global _switch_context_first_make
-.type switch_context_first_make, @function
-.type _switch_context_first_make, @function
-_switch_context_first_make:
-switch_context_first_make:
+.global switch_context_first_full_save
+.type switch_context_first_full_save, @function
+switch_context_first_full_save:
 	xor %eax,%eax
 	cmp $1,%esi             /* CF = val ? 0 : 1 */
 	adc %esi,%eax           /* eax = val + !val */

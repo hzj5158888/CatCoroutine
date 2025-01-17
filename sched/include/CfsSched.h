@@ -35,9 +35,10 @@ public:
 	[[nodiscard]] const char * what() const noexcept override { return "Apply Ready Coroutine Exception"; }
 };
 
-struct CfsSchedManager;
-struct CfsSchedEntity : public SchedEntity
+class CfsSchedManager;
+class CfsSchedEntity : public SchedEntity
 {
+public:
 	constexpr static int nice_offset = 20;
 
 	uint16_t nice{};
@@ -52,37 +53,43 @@ struct CfsSchedEntity : public SchedEntity
 	}
 };
 
-struct CfsScheduler : public Scheduler
+class CfsScheduler : public Scheduler
 {
+public:
 	uint64_t min_v_runtime{};
 	std::atomic<uint64_t> sum_v_runtime{};
 
-	spin_lock m_lock{};
+	spin_lock sched_lock{};
 	std::counting_semaphore sem_ready{};
 	std::multiset<Co_t *, CoPtrLessCmp> ready{};
 	std::shared_ptr<CfsSchedManager> manager{};
-	Co_t * running_co;
+	Co_t * running_co{};
+	Co_t * interrupt_co{};
+	Co_t * dead_co{};
 
-	jmp_buf run_loop_ctx{};
+	Context sched_ctx{};
 
 	void apply_ready(Co_t * co);
 	void remove_ready(Co_t * co);
-	void remove_scheduler(Co_t * co);
+	void remove_from_scheduler(Co_t * co);
 	[[nodiscard]] Co_t * pickup_ready();
 	void run(Co_t * co) override;
 	void make_dead();
 	void jump_to_exec();
-	int32_t interrupt() override;
+	Co_t * interrupt() override;
 	[[noreturn]] void start();
+	void process_co_trans();
 };
 
-struct CfsSchedManager
+class CfsSchedManager
 {
+public:
 	using CoReadyIter = std::multiset<Co_t*, CoPtrLessCmp>::iterator;
 
 	constexpr static uint64_t INF = 0x3f3f3f3f3f3f3f3f;
 	std::vector<std::shared_ptr<CfsScheduler>> schedulers;
 
 	void apply(Co_t * co);
-	void wakeup_from_await(Co_t * co);
+	void wakeup_await_co_all(Co_t * await_callee);
+	void coroutine_yield(Co_t * yield_co);
 };
