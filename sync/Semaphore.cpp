@@ -8,12 +8,12 @@
 namespace co {
 	void * sem_create(uint32_t count)
 	{
-		auto sem = static_cast<Sem_t*>(co_ctx::loc->alloc->sem_pool.allocate_safe(sizeof (Sem_t)));
+		auto sem = static_cast<Sem_t*>(co_ctx::loc->alloc.sem_pool.allocate_safe(sizeof (Sem_t)));
 		if (sem == nullptr) [[unlikely]]
 			return nullptr;
 
 		new (sem) Sem_t(count);
-		sem->alloc = &co_ctx::loc->alloc->sem_pool;
+		sem->alloc = &co_ctx::loc->alloc.sem_pool;
 		return sem;
 	}
 
@@ -30,7 +30,11 @@ namespace co {
 			return;
 
 		/* update stack size */
+#ifdef __STACK_STATIC__
 		co->ctx.set_stk_size();
+#elif __STACK_DYN__
+		co->ctx.set_stk_dyn_size();
+#endif
 
 		static_cast<Sem_t*>(handle)->wait();
 	}

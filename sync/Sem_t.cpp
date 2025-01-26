@@ -30,7 +30,7 @@ void Sem_t::wait()
 	auto co = co_ctx::loc->scheduler->running_co;
 	co_ctx::loc->scheduler->interrupt();
 	co->status = CO_WAITING;
-	co_ctx::loc->scheduler->jump_to_exec();
+	co_ctx::loc->scheduler->jump_to_sched();
 }
 
 bool Sem_t::try_wait()
@@ -70,7 +70,6 @@ void Sem_t::signal()
 	lock.unlock();
 
 	// push_back to scheduler
-	co->status = CO_READY;
 	co_ctx::manager->apply(co);
 
 	/* resource release */

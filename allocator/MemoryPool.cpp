@@ -50,6 +50,7 @@ void MemoryPool::createMemoryBlock(size_t block_size)
 {
     // Create the block
     auto* block = reinterpret_cast<SMemoryBlockHeader*>(std::malloc(sizeof(SMemoryBlockHeader) + block_size));
+    //memset(block, 0, sizeof(SMemoryBlockHeader) + block_size);
     if (block == nullptr)
       throw EMemoryErrors::CANNOT_CREATE_BLOCK;
 
@@ -64,8 +65,7 @@ void MemoryPool::createMemoryBlock(size_t block_size)
         block->prev = this->currentBlock;
         this->currentBlock->next = block;
         this->currentBlock = block;
-    }
-    else {
+    } else {
         block->next = block->prev = nullptr;
         this->firstBlock = block;
         this->currentBlock = block;
@@ -74,27 +74,30 @@ void MemoryPool::createMemoryBlock(size_t block_size)
 
 void* MemoryPool::allocate(size_t instances)
 {
-    if (instances + sizeof(SMemoryUnitHeader) >= this->currentBlock->blockSize - this->currentBlock->offset
+    size_t real_size = instances + (ALIGN - sizeof(SMemoryUnitHeader));
+    if (real_size + sizeof(SMemoryUnitHeader) >= this->currentBlock->blockSize - this->currentBlock->offset
       && this->single_block)
       return nullptr;
 
     // If there is enough space in current block then use the current block
-    if (instances + sizeof(SMemoryUnitHeader) < this->currentBlock->blockSize - this->currentBlock->offset);
+    if (real_size + sizeof(SMemoryUnitHeader) < this->currentBlock->blockSize - this->currentBlock->offset);
         // Create new block if not enough space
-    else if (instances + sizeof(SMemoryUnitHeader) >= this->defaultBlockSize) {
-      this->createMemoryBlock(instances + sizeof(SMemoryUnitHeader));
+    else if (real_size + sizeof(SMemoryUnitHeader) >= this->defaultBlockSize) {
+      this->createMemoryBlock(real_size + sizeof(SMemoryUnitHeader));
     } else {
       this->createMemoryBlock(this->defaultBlockSize);
     }
 
     // Add unit
-    auto* unit = reinterpret_cast<SMemoryUnitHeader*>(reinterpret_cast<char*>(this->currentBlock) + sizeof(SMemoryBlockHeader) + this->currentBlock->offset);
-    unit->length = instances;
+    auto * unit = reinterpret_cast<SMemoryUnitHeader*>(reinterpret_cast<char*>(this->currentBlock) + sizeof(SMemoryBlockHeader) + this->currentBlock->offset);
+    unit->length = real_size;
     unit->container = this->currentBlock;
     this->currentBlock->numberOfAllocated++;
-    this->currentBlock->offset += sizeof(SMemoryUnitHeader) + instances;
+    this->currentBlock->offset += sizeof(SMemoryUnitHeader) + real_size;
 
-    return reinterpret_cast<char*>(unit) + sizeof(SMemoryUnitHeader);
+    auto ans = reinterpret_cast<char*>(unit) + sizeof(SMemoryUnitHeader);
+    auto aligned_ans = ans + (ALIGN - sizeof(SMemoryUnitHeader));
+    return (void*)aligned_ans;
 }
 
 void * MemoryPool::allocate_safe(size_t instances)
@@ -145,18 +148,20 @@ void MemoryPool::free(void* unit_pointer_start)
 		return;
 
     // Find unit
-    auto* unit = reinterpret_cast<SMemoryUnitHeader*>(reinterpret_cast<char*>(unit_pointer_start) - sizeof(SMemoryUnitHeader));
+    auto* unit = reinterpret_cast<SMemoryUnitHeader*>(reinterpret_cast<char*>(unit_pointer_start) - sizeof(SMemoryUnitHeader) - (ALIGN - sizeof(SMemoryUnitHeader)));
     SMemoryBlockHeader* block = unit->container;
 
     // If last in block, then reset offset
-    if (reinterpret_cast<char*>(block) + sizeof(SMemoryBlockHeader) + block->offset == reinterpret_cast<char*>(unit) + sizeof(SMemoryUnitHeader) + unit->length) {
+    if (reinterpret_cast<char*>(block) + sizeof(SMemoryBlockHeader) + block->offset == reinterpret_cast<char*>(unit) + sizeof(SMemoryUnitHeader) + unit->length) 
+    {
         block->offset -= sizeof(SMemoryUnitHeader) + unit->length;
         block->numberOfAllocated--;
-    }
-    else block->numberOfDeleted++;
+    } else 
+        block->numberOfDeleted++;
 
     // If block offset is 0 remove block if not the only one left
-    if (this->currentBlock != this->firstBlock && (block->offset == 0 || block->numberOfAllocated == block->numberOfDeleted)) {
+    if (this->currentBlock != this->firstBlock && (block->offset == 0 || block->numberOfAllocated == block->numberOfDeleted)) 
+    {
         if (block == this->firstBlock) {
             this->firstBlock = block->next;
             this->firstBlock->prev = nullptr;
@@ -178,8 +183,40 @@ void MemoryPool::free_safe(void *unit_pointer_start)
 	if (unit_pointer_start == nullptr)
 		return;
 
-	std::lock_guard<spin_lock> lock(m_lock);
-	free(unit_pointer_start);
+    // Find unit
+    auto* unit = reinterpret_cast<SMemoryUnitHeader*>(reinterpret_cast<char*>(unit_pointer_start) - sizeof(SMemoryUnitHeader) - (ALIGN - sizeof(SMemoryUnitHeader)));
+    SMemoryBlockHeader* block = unit->container;
+
+    // If last in block, then reset offset
+    if (reinterpret_cast<char*>(block) + sizeof(SMemoryBlockHeader) + block->offset == reinterpret_cast<char*>(unit) + sizeof(SMemoryUnitHeader) + unit->length) 
+    {
+        block->offset -= sizeof(SMemoryUnitHeader) + unit->length;
+        block->numberOfAllocated--;
+    } else 
+        block->numberOfDeleted++;
+
+    // If block offset is 0 remove block if not the only one left
+    m_lock.lock();
+    if (this->currentBlock != this->firstBlock && (block->offset == 0 || block->numberOfAllocated == block->numberOfDeleted)) 
+    {
+        if (block == this->firstBlock) 
+        {
+            this->firstBlock = block->next;
+            this->firstBlock->prev = nullptr;
+        } else if (block == this->currentBlock) 
+        {
+            this->currentBlock = block->prev;
+            this->currentBlock->next = nullptr;
+        } else {
+            block->prev->next = block->next;
+            block->next->prev = block->prev;
+        }
+
+        m_lock.unlock();
+        std::free(block);
+    } else {
+        m_lock.unlock();
+    }
 }
 
 void MemoryPool::dumpPoolData()

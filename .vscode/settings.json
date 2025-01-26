@@ -52,6 +52,21 @@
         "ctime": "cpp",
         "numbers": "cpp",
         "semaphore": "cpp",
-        "stop_token": "cpp"
+        "stop_token": "cpp",
+        "charconv": "cpp",
+        "condition_variable": "cpp",
+        "csetjmp": "cpp",
+        "cstring": "cpp",
+        "set": "cpp",
+        "future": "cpp",
+        "iomanip": "cpp",
+        "mutex": "cpp",
+        "ranges": "cpp",
+        "span": "cpp",
+        "cinttypes": "cpp",
+        "variant": "cpp",
+        "map": "cpp",
+        "unordered_set": "cpp",
+        "format": "cpp"
     }
 }

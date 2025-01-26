@@ -9,18 +9,15 @@
 #include <thread>
 
 #include "../utils/include/Invoker.h"
-#include "../utils/include/utils.h"
-#include "../utils/include/error.h"
 #include "../sched/include/CfsSchedDef.h"
 
 namespace co {
 	constexpr static uint64_t INVALID_CO_ID = 0;
 	constexpr static uint64_t MAIN_CO_ID = 1;
-    constexpr static uint64_t SSO_SIZE = 96; // 小对象大小
-	constexpr static uint64_t MAX_YIELD_BUFFER_CAPACITY = 64; // 产出缓存最大值，必须是2的幂
-	constexpr static uint64_t MAX_STACK_SIZE = 1024 * 1024 * 2; // 2MB
-	constexpr static uint64_t STATIC_STK_NUM = 16;
-	constexpr static uint16_t CPU_CORE = 1;
+	constexpr static uint64_t MAX_STACK_SIZE = 1024 * 1024 * 1; // 1 MB
+	constexpr static uint16_t CPU_CORE = __CPU_CORE__;
+	constexpr static uint64_t STATIC_STACK_SIZE = 1024 * 1024 * 8; // 8MB
+	constexpr static uint64_t STATIC_STK_NUM = std::max(CPU_CORE + 1, 64);
 	static_assert(CPU_CORE > 0);
 
 	class Co_UnInitialization_Exception : public std::exception

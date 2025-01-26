@@ -2,20 +2,52 @@
 // Created by hzj on 25-1-14.
 //
 
-#ifndef COROUTINE_UTILS_INCLUDE_SPIN_LOCK_H
-#define COROUTINE_UTILS_INCLUDE_SPIN_LOCK_H
+#pragma once
 
 #include <memory>
 #include <utility>
 #include <atomic>
+#include <chrono>
+#include <thread>
 
-class spin_lock
+class Sleeper 
+{
+	const std::chrono::nanoseconds delta;
+	uint32_t spinCount;
+
+	static constexpr uint32_t kMaxActiveSpin = 8000;
+
+	public:
+	static constexpr std::chrono::nanoseconds kMinYieldingSleep = std::chrono::microseconds(500);
+
+	constexpr Sleeper() noexcept : delta(kMinYieldingSleep), spinCount(0) {}
+
+	explicit Sleeper(std::chrono::nanoseconds d) noexcept : delta(d), spinCount(0) {}
+
+	void wait() noexcept 
+	{
+		if (spinCount < kMaxActiveSpin) [[likely]]
+		{
+			++spinCount;
+			__builtin_ia32_pause();
+		} else {
+			std::this_thread::sleep_for(delta);
+		}
+	}
+};
+
+class spin_lock_sleep
 {
 private:
 	std::atomic<bool> m_lock{false};
+	std::chrono::nanoseconds kMinYieldingSleep = std::chrono::microseconds(500);
 public:
+	spin_lock_sleep() = default;
+	spin_lock_sleep(std::chrono::nanoseconds kMinYieldingSleep) : kMinYieldingSleep(kMinYieldingSleep) {}
+
 	void lock() noexcept
 	{
+		Sleeper sleeper{kMinYieldingSleep};
 		for (;;)
 		{
 			// Optimistically assume the lock is free on the first try
@@ -27,7 +59,7 @@ public:
 			{
 				// Issue X86 PAUSE or ARM YIELD instruction to reduce contention between
 				// hyper-threads
-				__builtin_ia32_pause();
+				sleeper.wait();
 			}
 		}
 	}
@@ -44,11 +76,4 @@ public:
 	{
 		m_lock.store(false, std::memory_order_release);
 	}
-
-	bool lockable() noexcept
-	{
-		return !m_lock.load(std::memory_order_acquire);
-	}
 };
-
-#endif //COROUTINE_UTILS_INCLUDE_SPIN_LOCK_H

@@ -2,6 +2,7 @@
 // Created by hzj on 25-1-14.
 //
 
+#include <cstdint>
 #include <set>
 
 #include "../include/CoPrivate.h"
@@ -9,20 +10,28 @@
 
 void CfsSchedManager::apply(Co_t * co)
 {
+	init_lock.lock();
+	init_lock.unlock();
+
 	// 协程运行中
 	if (co->status == CO_RUNNING) [[unlikely]]
-		throw ApplyReadyCoException();
+		throw ApplyRunningCoException();
 	// 协程在调度器中
 	if (co->status == CO_READY && co->scheduler != nullptr) [[unlikely]]
 		assert(false);
 
 	int min_scheduler_idx = 0;
-	uint64_t min_v_runtime = INF;
-	for (int i = 0; i < schedulers.size(); i++)
+	uint64_t min_balance = INF;
+	for (size_t i = 0; i < schedulers.size(); i++)
 	{
-		if (schedulers[i]->sum_v_runtime < min_v_runtime)
+		auto & scheduler = schedulers[i];
+		uint64_t balance = scheduler->sum_v_runtime.load(std::memory_order_relaxed);
+
+		//std::cout << "<" << balance << ", " << i << ">" << std::endl;
+
+		if (balance < min_balance)
 		{
-			min_v_runtime = schedulers[i]->sum_v_runtime;
+			min_balance = balance;
 			min_scheduler_idx = i;
 		}
 	}
@@ -31,39 +40,29 @@ void CfsSchedManager::apply(Co_t * co)
 	schedulers[min_scheduler_idx]->apply_ready(co);
 }
 
-void CfsSchedManager::coroutine_yield(Co_t * yield_co)
-{
-	int res = save_context(yield_co->ctx.get_jmp_buf(), &yield_co->ctx.first_full_save);
-	if (res == CONTEXT_RESTORE)
-		return;
-
-	/* update stack size */
-	yield_co->ctx.set_stk_size();
-
-	/* process coroutine */
-	yield_co->scheduler->interrupt();
-	yield_co->scheduler->remove_from_scheduler(yield_co);
-	apply(yield_co);
-	co_ctx::loc->scheduler->jump_to_exec();
-	// never arrive
-}
-
 void CfsSchedManager::wakeup_await_co_all(Co_t * await_callee)
 {
 	if (await_callee == nullptr) [[unlikely]]
 		return;
 
-	std::lock_guard<spin_lock> lock(await_callee->await_lock);
+	std::lock_guard lock(await_callee->await_lock);
 	auto caller_q = &await_callee->await_caller;
 	while (!caller_q->empty())
 	{
 		auto cur = caller_q->front();
 		caller_q->pop();
 
-		cur->status_lock.lock();
-		cur->status = CO_READY;
 		cur->await_callee = nullptr;
-		cur->status_lock.unlock();
 		apply(cur);
 	}
+}
+
+void CfsSchedManager::push_scheduler(const std::shared_ptr<CfsScheduler> & s)
+{
+	std::lock_guard lock(w_lock);
+	schedulers.push_back(s);
+	
+	/* vector init finish */
+	if (schedulers.size() == schedulers.capacity())
+		init_lock.unlock();
 }

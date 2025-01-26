@@ -17,6 +17,7 @@
 #include "../data_structure/include/RingBuffer.h"
 #include "../allocator/include/MemoryPool.h"
 #include "../../sched/include/CfsSchedDef.h"
+#include "../../sched/include/CfsSchedEntity.h"
 #include "../../sync/include/Mutex.h"
 #include "AllocatorGroup.h"
 
@@ -25,8 +26,8 @@ enum CO_STATUS
     CO_NEW = 1,
     CO_READY,
     CO_RUNNING,
+	CO_INTERRUPT,
     CO_WAITING,
-    CO_CLOSING,
 	CO_DEAD
 };
 
@@ -38,19 +39,20 @@ struct Co_t
 	// 状态锁
 	spin_lock status_lock{};
 
-	// 线程所有权
-	spin_lock stk_active_lock{};
-
 	// 分配器信息
 	MemoryPool * allocator{};
 
     // 上下文
     Context ctx{};
+	// 栈是否活跃
+	spin_lock stk_active_lock{};
 
     // 存储
 	// CFS Scheduler
+	/*
 	using CoReadyIter = std::multiset<Co_t*>::iterator;
 	CoReadyIter ready_self{};
+	*/
 
 	// await
 	spin_lock await_lock{};
@@ -58,7 +60,7 @@ struct Co_t
 	std::queue<Co_t *> await_caller{}; // 谁 await
 
     // 调度信息
-	std::shared_ptr<CfsSchedEntity> sched{};
+	alignas(__CACHE_LINE__) CfsSchedEntity sched{}; 
 	std::shared_ptr<CfsScheduler> scheduler{};
 
 	Co_t();
@@ -84,23 +86,13 @@ struct Co_t
 template<>
 struct std::hash<Co_t>
 {
-	std::size_t operator() (const Co_t & oth) const { return oth.id; }
-};
-
-struct CoPtrLessCmp
-{
-	bool operator () (const Co_t * a, const Co_t * b) const { return *a < *b; }
-};
-
-struct CoPtrGreaterCmp
-{
-	bool operator () (const Co_t * a, const Co_t * b) const { return *a > *b; }
+	std::size_t operator() (const Co_t & oth) const noexcept { return oth.id; }
 };
 
 struct local_t
 {
 	std::thread::id thread_id{};
-	std::unique_ptr<AllocatorGroup> alloc{};
+	AllocatorGroup alloc{};
 	std::shared_ptr<CfsScheduler> scheduler{};
 };
 
@@ -110,6 +102,5 @@ namespace co_ctx
 	extern std::unique_ptr<Context> manger_ctx;
 	extern std::shared_ptr<CfsSchedManager> manager;
 	extern std::atomic<uint32_t> coroutine_count;
-	extern std::vector<Co_t*> co_vec; // debug
 	extern thread_local std::shared_ptr<local_t> loc;
 }

@@ -5,7 +5,7 @@
 
 #include "SchedulerDef.h"
 
-class CfsSchedEntity; // 防止头文件循环引用
+// 防止头文件循环引用
 class CfsScheduler;
 class CfsSchedManager;
 

@@ -76,6 +76,9 @@ struct SMemoryBlockHeader {
         // Destructor
         ~MemoryPool();
 
+        constexpr static auto ALIGN = 64;
+        static_assert(((ALIGN - 1) & ALIGN) == 0);
+
         // Data about the memory pool blocks
         SMemoryBlockHeader* firstBlock;
         SMemoryBlockHeader* currentBlock;

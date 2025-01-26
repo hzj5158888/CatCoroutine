@@ -7,7 +7,10 @@ _switch_context:
     mov 24(%rdi), %r13
     mov 32(%rdi), %r14
     mov 40(%rdi), %r15
+    ldmxcsr 64(%rdi)    /* sse2 control word */
+    fldcw   68(%rdi)    /* x87 fpu control word */
     pop %rax            /* call instruction push the ret pc to stack, pop it */
     mov 48(%rdi), %rsp
+    prefetcht0 (%rsp)
     mov %rsi, %rax
     jmp *56(%rdi)

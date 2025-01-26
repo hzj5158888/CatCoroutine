@@ -3,9 +3,6 @@
 //
 
 #pragma once
-
-#include <cstdint>
-
 struct StackInfo;
 
 struct StackPool;

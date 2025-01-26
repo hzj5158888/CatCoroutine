@@ -2,6 +2,7 @@
 // Created by hzj on 25-1-14.
 //
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -15,145 +16,135 @@
 
 StackPool::StackPool()
 {
-	for (int i = 0; i < co::STATIC_STK_NUM; i++)
-		freed_stack.push(i);
+	for (size_t i = 0; i < co::STATIC_STK_NUM; i++)
+		freed_stack.push_back(i);
 }
 
-void StackPool::alloc_dyn_stk_mem(void * &mem_ptr, uint8_t * &stk_ptr, std::size_t size)
+void StackPool::alloc_dyn_stk_mem(void * &mem_ptr, std::size_t size)
 {
-	mem_ptr = reinterpret_cast<void*>(dyn_stk_pool.allocate_safe(size + StackInfo::STACK_RESERVE));
-
-	stk_ptr = reinterpret_cast<uint8_t *>((unsigned long)mem_ptr + size);
-	stk_ptr = align_stk_ptr(stk_ptr);
+	mem_ptr = dyn_stk_pool.allocate_safe(size + StackInfo::STACK_RESERVE);
 }
 
 void StackPool::write_back(StackInfo * info)
 {
-	if (info->co == nullptr) [[unlikely]]
-		return;
-
-	[[unlikely]] assert(info->co->status != CO_RUNNING);
-
-	auto ctx = &info->co->ctx;
-	ctx->stk_is_static = false;
-	ctx->static_stk_pool = nullptr;
-	ctx->set_stk_size();
-	ctx->stk_real_bottom = nullptr;
-	if (ctx->stk_dyn == nullptr)
+	auto co = info->occupy_co;
+	if (co->ctx.stk_dyn_mem == nullptr)
 	{
-		std::size_t stk_size = ctx->stk_size;
-		alloc_dyn_stk_mem(ctx->stk_dyn_mem, ctx->stk_dyn, stk_size);
-		ctx->stk_dyn_capacity = stk_size;
-		ctx->stk_dyn_alloc = &dyn_stk_pool;
-		ctx->stk_dyn_real_bottom = ctx->stk_dyn;
-		copy_stk(ctx->stk_dyn, info->get_stk_ptr(), stk_size);
-	} else if (ctx->stk_dyn_capacity >= ctx->stk_size)
+		co->ctx.stk_dyn_saver_alloc = &dyn_stk_pool;
+		co->ctx.stk_dyn_capacity = 4 * co->ctx.stk_size / 3; // 1.25 * stk_size
+		alloc_dyn_stk_mem(co->ctx.stk_dyn_mem, co->ctx.stk_size);
+	} else if (co->ctx.stk_dyn_capacity <= co->ctx.stk_size)
 	{
-		copy_stk(ctx->stk_dyn, info->get_stk_ptr(), ctx->stk_size);
-	} else {
-		ctx->stk_dyn_alloc->free_safe(ctx->stk_dyn_mem);
-		ctx->stk_dyn_mem = nullptr;
-		ctx->stk_dyn = nullptr;
-
-		ctx->stk_dyn_alloc = &dyn_stk_pool;
-		ctx->stk_dyn_capacity = 4 * ctx->stk_size / 3; // 1.25 * ctx->stk_size()
-		alloc_dyn_stk_mem(ctx->stk_dyn_mem, ctx->stk_dyn, ctx->stk_dyn_capacity);
-		ctx->stk_dyn_real_bottom = ctx->stk_dyn;
-		copy_stk(ctx->stk_dyn, info->get_stk_ptr(), ctx->stk_size);
+		co->ctx.stk_dyn_saver_alloc->free_safe(co->ctx.stk_dyn_mem);
+		co->ctx.stk_dyn_saver_alloc = &dyn_stk_pool;
+		co->ctx.stk_dyn_capacity = 4 * co->ctx.stk_size / 3; // 1.25 * stk_size
+		alloc_dyn_stk_mem(co->ctx.stk_dyn_mem, co->ctx.stk_dyn_capacity);
 	}
-}
-
-void StackPool::setup_co_static_stk(Co_t * co, bool stk_is_static, StackPool * static_pool)
-{
-	co->ctx.stk_is_static = stk_is_static;
-	co->ctx.static_stk_pool = static_pool;
-}
-
-uint8_t * StackPool::alloc_static_stk(Co_t * co)
-{
-	[[unlikely]] assert(co->status != CO_RUNNING);
-
-	std::lock_guard<spin_lock> lock(m_lock);
-
-	auto iter = freed_co.find(co);
-	if (iter != freed_co.end()) // Coroutine using static stack
-	{
-		int stk_idx = iter->second;
-		freed_co.erase(iter);
-		running_co.insert({co, stk_idx});
-		return stk[stk_idx].get_stk_ptr();
-	}
-
-	if (!freed_stack.empty())
-	{
-		int stk_idx = freed_stack.front();
-		freed_stack.pop();
-
-		stk[stk_idx].co = co;
-		running_co.insert({co, stk_idx});
-		if (co->ctx.stk_size > 0 && co->ctx.stk_dyn != nullptr)
-			copy_stk(stk[stk_idx].get_stk_ptr(), co->ctx.stk_dyn, co->ctx.stk_size);
-
-		setup_co_static_stk(co, true, this);
-		return stk[stk_idx].get_stk_ptr();
-	}
-
-	if (freed_co.empty()) [[unlikely]]
-		return nullptr;
-
-	int stk_idx = freed_co.begin()->second;
-	auto co_stack_info = &stk[stk_idx];
-	// write back to old stack
-	write_back(co_stack_info);
-	freed_co.erase(freed_co.begin());
-	/* switch to new stack */
-	co_stack_info->co = co;
-	running_co.insert({co, stk_idx});
-	// copy stack data
-	if (co->ctx.stk_size > 0)
-		copy_stk(co_stack_info->get_stk_ptr(), co->ctx.stk_dyn, co->ctx.stk_size);
-
-	setup_co_static_stk(co, true, this);
-	return co_stack_info->get_stk_ptr();
-}
-
-void StackPool::free_stack(Co_t * co)
-{
-	[[unlikely]] assert(co->status != CO_RUNNING);
-
-	std::lock_guard<spin_lock> lock(m_lock);
-
-	[[unlikely]] assert(running_co.find(co) == running_co.end());
-
-	auto iter = freed_co.find(co);
-	[[unlikely]] assert(iter != freed_co.end());
-	int stk_idx = iter->second;
-	stk[stk_idx].co = nullptr;
-	freed_stack.push(stk_idx);
 
 	co->ctx.stk_is_static = false;
-	co->ctx.stk_dyn = nullptr;
-	if (co->ctx.stk_dyn_mem != nullptr) [[likely]]
-		co->ctx.stk_dyn_alloc->free_safe(co->ctx.stk_dyn_mem);
-	co->ctx.stk_dyn_mem = nullptr;
-	co->ctx.stk_dyn_alloc = nullptr;
-	co->ctx.stk_dyn_capacity = {};
+	co->ctx.stk_dyn_size = co->ctx.stk_size;
+	std::memcpy(co->ctx.stk_dyn_mem, reinterpret_cast<void*>(co->ctx.jmp_reg.sp), co->ctx.stk_size);
 }
 
-void StackPool::release_stack(Co_t *co)
+void StackPool::alloc_static_stk(Co_t * co)
 {
-	[[unlikely]] assert(co->status != CO_RUNNING);
+	std::lock_guard lock(m_lock);
 
-	std::lock_guard<spin_lock> lock(m_lock);
+	int stk_idx{};
+	uint8_t * stk_ptr{};
+	auto iter = freed_co.find(co);
+	if (iter != freed_co.end())
+	{
+		stk_idx = iter->second;
+		freed_co.erase(co);
+		stk_ptr = stk[stk_idx].get_stk_bp_ptr();
+	} else if (!freed_stack.empty())
+	{
+		stk_idx = freed_stack.back();
+		freed_stack.pop_back();
+
+		stk_ptr = stk[stk_idx].get_stk_bp_ptr();
+		if (co->ctx.stk_dyn_size > 0)
+		{
+			auto dyn_size = co->ctx.stk_dyn_size;
+			std::memcpy(stk_ptr - dyn_size, co->ctx.stk_dyn_mem, dyn_size);
+		}
+	} else {
+		DASSERT(!freed_co.empty());
+
+		auto free_co_idx = freed_co.begin()->second;
+		freed_co.erase(freed_co.begin());
+
+		write_back(&stk[free_co_idx]);
+
+		stk_idx = free_co_idx;
+		stk_ptr = stk[stk_idx].get_stk_bp_ptr();
+		if (co->ctx.stk_dyn_size > 0)
+		{
+			auto dyn_size = co->ctx.stk_dyn_size;
+			std::memcpy(stk_ptr - dyn_size, co->ctx.stk_dyn_mem, dyn_size);
+		}
+	}
+
+	stk[stk_idx].occupy_co = co;
+	running_co.insert({co, stk_idx});
+	setup_co_static_stk(co, stk_ptr);
+}
+
+void StackPool::destroy_stack(Co_t * co)
+{
+	m_lock.lock();
+
+	int stk_idx = -1;
+	auto iter = running_co.find(co);
+	if (iter != running_co.end())
+	{
+		stk_idx = iter->second;
+		running_co.erase(iter);
+	}
+
+	iter = freed_co.find(co);
+	if (iter != freed_co.end())
+	{
+		stk_idx = iter->second;
+		freed_co.erase(iter);
+	}
+
+	if (stk_idx >= 0)
+		freed_stack.push_back(stk_idx);
+
+	m_lock.unlock();
+
+	if (co->ctx.stk_dyn_mem != nullptr)
+		co->ctx.stk_dyn_saver_alloc->free_safe(co->ctx.stk_dyn_mem);
+
+	co->ctx.stk_dyn_saver_alloc = nullptr;
+	co->ctx.stk_dyn_mem = nullptr;
+	co->ctx.stk_dyn_size = 0;
+	co->ctx.stk_dyn_capacity = 0;
+	co->ctx.stk_dyn = nullptr;
+	co->ctx.stk_dyn_real_bottom = nullptr;
+
+	co->ctx.stk_size = 0;
+	co->ctx.stk_is_static = false;
+	co->ctx.stk_real_bottom = nullptr;
+	co->ctx.occupy_stack = -1;
+}
+
+void StackPool::release_stack(Co_t * co)
+{
+	std::lock_guard lock(m_lock);
 
 	auto iter = running_co.find(co);
-	[[unlikely]] assert(iter != running_co.end());
-	running_co.erase(iter);
+	DASSERT(iter != running_co.end());
 	int stk_idx = iter->second;
+	running_co.erase(iter);
 	freed_co.insert({co, stk_idx});
 }
 
-void StackPool::copy_stk(uint8_t *dest, uint8_t *src, std::size_t size)
+void StackPool::setup_co_static_stk(Co_t* co, uint8_t * stk)
 {
-	std::memcpy(dest - size, src - size, size);
+	co->ctx.stk_is_static = true;
+	co->ctx.static_stk_pool = this;
+	co->ctx.set_stack(stk);
 }
