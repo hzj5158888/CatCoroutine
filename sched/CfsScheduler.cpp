@@ -34,7 +34,9 @@ void CfsScheduler::apply_ready(Co_t * co)
 
 void CfsScheduler::remove_ready(Co_t * co)
 {
-	[[unlikely]] assert(co->status == CO_READY);
+	/* never used */
+	assert(false);
+	DASSERT(co->status == CO_READY);
 
 	sem_ready.wait();
 

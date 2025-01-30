@@ -107,9 +107,9 @@ struct SMemoryBlockHeader {
          *
          * @returns void* Pointer to the newly allocateN space
          */
-        void* allocate(size_t instances);
+        void* allocate_unsafe(size_t instances);
 
-		void* allocate_safe(size_t instances);
+		void* allocate(size_t instances);
 
 		template<typename T, typename ... Args>
 		T * newElem(Args &&... args);
@@ -137,9 +137,9 @@ struct SMemoryBlockHeader {
          *
          * @param void* unit_pointer_start Pointer to the object to free
          */
-        void free(void* unit_pointer_start);
+        void free_unsafe(void* unit_pointer_start);
 
-		void free_safe(void * unit_pointer_start);
+		void deallocate(void * unit_pointer_start);
 
         /**
          * Dump memory pool meta data of blocks unit to stream.
@@ -166,7 +166,7 @@ struct SMemoryBlockHeader {
 
     template<typename T>
     inline T* MemoryPool::allocateN(size_t instances) {
-        return reinterpret_cast<T*>(this->allocate(instances * sizeof(T)));
+        return reinterpret_cast<T*>(this->allocate_unsafe(instances * sizeof(T)));
     }
 
     template<typename T>

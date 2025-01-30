@@ -10,6 +10,16 @@
 #include <cxxabi.h>
 #include <cassert>
 #include <cstdint>
+#include <memory_resource>
+
+#define LIKELY(x) (__builtin_expect((x), 1))
+#define UNLIKELY(x) (__builtin_expect((x), 0))
+
+#ifdef __DEBUG__
+#define DASSERT(expr) (assert(UNLIKELY(expr)))
+#else
+#define DASSERT(expr)
+#endif
 
 template<typename AddressType, typename FuncPtrType>
 AddressType get_member_func_addr(FuncPtrType func_ptr) // 不能在继承类使用
@@ -60,11 +70,12 @@ inline void print_trace()
 	printf("\n\n");
 }
 
-#define LIKELY(x) (__builtin_expect((x), 1))
-#define UNLIKELY(x) (__builtin_expect((x), 0))
-
-#ifdef __DEBUG__
-#define DASSERT(expr) (assert(UNLIKELY(expr)))
-#else
-#define DASSERT(expr)
+#ifdef __MEM_PMR__
+    inline std::pmr::pool_options get_default_pmr_opt()
+    {
+        return std::pmr::pool_options {
+            48,
+            1024 * 1024 * 4
+        };
+    }
 #endif

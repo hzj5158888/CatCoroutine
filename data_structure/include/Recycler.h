@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <memory>
 #include <mutex>
 #include <type_traits>
@@ -13,14 +14,14 @@
 #include "./moodycamel/ConcurrentQueue.h"
 
 using moodycamel::ConcurrentQueue;
+using moodycamel::ConcurrentQueueDefaultTraits;
 
-template<typename NodeType, typename Allocator>
-class NodeRecycler
+template<typename NodeType, typename Allocator, size_t LIFE_CYCLE = 8192>
+class Recycler
 {
 private:
-    constexpr static size_t MAX_NODE_LIFE_CYCLE = 10000;
-    constexpr static size_t MAX_QUEUE_SIZE = 3 * MAX_NODE_LIFE_CYCLE / 2;
-    constexpr static size_t TRY_RECYCLE_SIZE = 4 * MAX_NODE_LIFE_CYCLE / 3;
+    constexpr static size_t MAX_QUEUE_SIZE = 3 * LIFE_CYCLE / 2;
+    constexpr static size_t TRY_RECYCLE_SIZE = 4 * LIFE_CYCLE / 3;
 
     class info
     {
@@ -33,18 +34,17 @@ private:
         info(const uint64_t time, NodeType * node) : time(time), node(node) {}
     };
 
-    spin_lock m_lock;
+    Allocator alloc{};
     std::atomic<uint64_t> time_stamp{};
-    Allocator alloc;
-    std::vector<ConcurrentQueue<info>> pool;
+    std::vector<ConcurrentQueue<info>> pool{};
 public:
-    NodeRecycler() = delete;
-    explicit NodeRecycler(const size_t max_height)
+    Recycler() = delete;
+    explicit Recycler(const size_t max_type_count)
     {
-        pool.resize(max_height + 1);
+        pool.resize(max_type_count + 1);
     }
 
-    ~NodeRecycler()
+    ~Recycler()
     {
         for (auto & q : pool)
         {
@@ -60,13 +60,13 @@ public:
         }
     }
 
-    void pool_add_node(const uint8_t height, const info & node_info)
+    void pool_add_node(const size_t type, const info & node_info)
     {
-        auto & q = pool[height];
+        auto & q = pool[type];
 
         /* true => 插入成功，退出循环 */
         /* false => 插入失败，继续循环 */
-        while (!q.try_enqueue(node_info))
+        while (!q.try_enqueue(node_info)) // Fails if not enough memory to enqueue
         {
             info free_node{};
             auto res = q.try_dequeue(free_node);
@@ -76,33 +76,32 @@ public:
     }
 
     template<typename ... Args>
-    NodeType * allocate(const uint8_t height, Args &&... args)
+    NodeType * allocate(const size_t type, Args &&... args)
     {
         auto needToDelete = [this] (const info & x) -> bool
         {
-            return this->time_stamp.load(std::memory_order_acquire) - x.time > MAX_NODE_LIFE_CYCLE;
+            return this->time_stamp.load(std::memory_order_acquire) - x.time > LIFE_CYCLE;
         };
 
         info node_info{};
-        if (pool[height].size_approx() > TRY_RECYCLE_SIZE && pool[height].try_dequeue(node_info))
+        if (pool[type].size_approx() > TRY_RECYCLE_SIZE && pool[type].try_dequeue(node_info))
         {
             if (!needToDelete(node_info))
             {
-                pool_add_node(height, node_info);
-                return NodeType::create(alloc, height, std::forward<Args>(args)...);
+                pool_add_node(type, node_info);
+                return NodeType::create(alloc, std::forward<Args>(args)...);
             }
 
-            new (node_info.node) NodeType(height, std::forward<Args>(args)...);
+            new (node_info.node) NodeType(std::forward<Args>(args)...);
             return node_info.node;
         }
 
-        return NodeType::create(alloc, height, std::forward<Args>(args)...);
+        return NodeType::create(alloc, std::forward<Args>(args)...);
     }
 
-    void free(NodeType * node)
+    void deallocate(size_t type, NodeType * node)
     {
-        uint8_t height = node->height;
         uint64_t cur_time_stamp = time_stamp.fetch_add(1, std::memory_order_release);
-        pool_add_node(height, info{cur_time_stamp, node});
+        pool_add_node(type, info{cur_time_stamp, node});
     }
 };

@@ -8,7 +8,7 @@
 namespace co {
 	void * sem_create(uint32_t count)
 	{
-		auto sem = static_cast<Sem_t*>(co_ctx::loc->alloc.sem_pool.allocate_safe(sizeof (Sem_t)));
+		auto sem = static_cast<Sem_t*>(co_ctx::loc->alloc.sem_pool.allocate(sizeof (Sem_t)));
 		if (sem == nullptr) [[unlikely]]
 			return nullptr;
 

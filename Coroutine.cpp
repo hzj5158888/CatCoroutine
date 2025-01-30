@@ -2,6 +2,7 @@
 #include <memory>
 #include <thread>
 #include <cstring>
+#include <memory_resource>
 
 #include "context/include/Context.h"
 #include "include/Coroutine.h"
@@ -30,13 +31,13 @@ namespace co {
 	{
 		auto invoker = static_cast<InvokerBase*>(self);
 		invoker->operator()();
-		if ( invoker->allocator == nullptr) [[unlikely]]
+		if (invoker->allocator == nullptr) [[unlikely]]
 		{
 			delete invoker;
 		} else {
 			auto alloc = static_cast<MemoryPool*>(invoker->allocator);
 			invoker->~InvokerBase();
-			alloc->free_safe(invoker);
+			alloc->deallocate(invoker);
 		}
 	}
 
@@ -47,7 +48,7 @@ namespace co {
 
 		return {
 			&co_ctx::loc->alloc.invoker_pool,
-			get_member_func_addr<void * (*)(void*, std::size_t)>(&MemoryPool::allocate_safe)
+			get_member_func_addr<void * (*)(void*, std::size_t)>(&MemoryPool::allocate)
 		};
 	}
 
@@ -125,7 +126,7 @@ namespace co {
 		if (!co_ctx::is_init) [[unlikely]]
 			return nullptr;
 
-		Co_t * co = static_cast<Co_t*>(co_ctx::loc->alloc.co_pool.allocate_safe(sizeof(Co_t)));
+		Co_t * co = static_cast<Co_t*>(co_ctx::loc->alloc.co_pool.allocate(sizeof(Co_t)));
 		if (co == nullptr) [[unlikely]]
 			return nullptr;
 

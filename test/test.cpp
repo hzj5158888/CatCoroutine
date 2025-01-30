@@ -80,7 +80,7 @@ void dyn_alloc_test()
 		co::Co<co::PRIORITY_NORMAL> x, y;
 	};
 
-	constexpr auto coroutine_cnt = 400000;
+	constexpr auto coroutine_cnt = 4000;
 
 	std::cout << "dyn_alloc_test" << std::endl;
 

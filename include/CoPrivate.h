@@ -40,7 +40,11 @@ struct Co_t
 	spin_lock status_lock{};
 
 	// 分配器信息
+#ifdef __MEM_PMR__
+	std::pmr::synchronized_pool_resource * allocator{};
+#else
 	MemoryPool * allocator{};
+#endif
 
     // 上下文
     Context ctx{};
@@ -77,7 +81,11 @@ struct Co_t
 		Co_t * co = static_cast<Co_t*>(ptr);
 		auto alloc = co->allocator;
 		if (alloc)
-			alloc->free_safe(co);
+#ifdef __MEM_PMR__
+			alloc->deallocate(co, sizeof(Co_t));
+#else
+			alloc->deallocate(co);
+#endif
 		else
 			std::free(co);
 	}

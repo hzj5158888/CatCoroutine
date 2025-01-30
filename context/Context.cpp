@@ -7,9 +7,11 @@ void switch_context(Context * ctx, int ret)
 {
     if (!ctx->first_full_save) [[likely]]
 	{
+        ctx->assert_stack();
 		_switch_context(ctx->get_jmp_buf(), ret);
 	} else {
         ctx->first_full_save = false;
+        ctx->assert_stack();
 		switch_context_first_full_save(ctx->get_jmp_buf(), ctx->arg_reg.di, ctx->arg_reg.si);
     }
 }

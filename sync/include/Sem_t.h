@@ -3,6 +3,7 @@
 //
 #pragma once
 
+#include <memory_resource>
 #include <queue>
 #include <mutex>
 #include <atomic>
@@ -28,7 +29,11 @@ public:
 	std::atomic<int32_t> caller_count{};
 	std::atomic<bool> wait_close{false};
 
+#ifdef __MEM_PMR__
+	std::pmr::synchronized_pool_resource * alloc{};
+#else
 	MemoryPool * alloc{};
+#endif
 
 	explicit Sem_t(uint32_t val) : count(val) {};
 	Sem_t(const Sem_t & sem) = delete;

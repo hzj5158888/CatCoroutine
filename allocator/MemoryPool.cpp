@@ -72,7 +72,7 @@ void MemoryPool::createMemoryBlock(size_t block_size)
     }
 }
 
-void* MemoryPool::allocate(size_t instances)
+void* MemoryPool::allocate_unsafe(size_t instances)
 {
     size_t real_size = instances + (ALIGN - sizeof(SMemoryUnitHeader));
     if (real_size + sizeof(SMemoryUnitHeader) >= this->currentBlock->blockSize - this->currentBlock->offset
@@ -100,16 +100,16 @@ void* MemoryPool::allocate(size_t instances)
     return (void*)aligned_ans;
 }
 
-void * MemoryPool::allocate_safe(size_t instances)
+void * MemoryPool::allocate(size_t instances)
 {
 	std::lock_guard<spin_lock> lock(m_lock);
-	return allocate(instances);
+	return allocate_unsafe(instances);
 }
 
 template<typename T, typename ... Args>
 T * MemoryPool::newElem(Args &&... args)
 {
-	auto ptr = allocate(sizeof(T));
+	auto ptr = allocate_unsafe(sizeof(T));
 	if (ptr == nullptr)
 		return nullptr;
 
@@ -135,14 +135,14 @@ void* MemoryPool::reallocate(void* unit_pointer_start, size_t new_size)
     }
 
     // Allocate new and free previous
-    void* temp_point = this->allocate(new_size);
+    void* temp_point = this->allocate_unsafe(new_size);
     std::memcpy(temp_point, unit_pointer_start, unit->length);
-    this->free(unit_pointer_start);
+    this->free_unsafe(unit_pointer_start);
 
     return temp_point;
 }
 
-void MemoryPool::free(void* unit_pointer_start)
+void MemoryPool::free_unsafe(void* unit_pointer_start)
 {
     if (unit_pointer_start == nullptr)
 		return;
@@ -178,7 +178,7 @@ void MemoryPool::free(void* unit_pointer_start)
     }
 }
 
-void MemoryPool::free_safe(void *unit_pointer_start)
+void MemoryPool::deallocate(void *unit_pointer_start)
 {
 	if (unit_pointer_start == nullptr)
 		return;

@@ -4,9 +4,13 @@
 #include <bits/wordsize.h>
 #include <csetjmp>
 #include <cstddef>
+#include <cstdio>
 #include <iostream>
 #include <cassert>
 #include <new>
+#include <memory_resource>
+
+#include "../data_structure/include/ListLockFree.h"
 
 #include "../allocator/include/MemoryPool.h"
 #include "../allocator/include/StackPoolDef.h"
@@ -31,13 +35,18 @@ struct Context
 	int32_t occupy_stack{-1};
 	uint8_t * stk_real_bottom{}; // real stack bottom
 	std::size_t stk_size{};
+	ListLockFree<uint16_t>::iterator freed_co_iter{};
 
     uint8_t * stk_dyn{};
 	void * stk_dyn_mem{};
 	std::size_t stk_dyn_size{};
 	uint32_t stk_dyn_capacity{};
 	DynStackPool * stk_dyn_alloc{};
+#ifdef __MEM_PMR__
+	std::pmr::synchronized_pool_resource * stk_dyn_saver_alloc{};
+#else
 	MemoryPool * stk_dyn_saver_alloc{};
+#endif
 	uint8_t * stk_dyn_real_bottom{};
 
 	/* System V Abi calling convention */
@@ -108,7 +117,10 @@ struct Context
 
 	void prefetch_stk() const { __builtin_prefetch((void*)jmp_reg.bp, 1, 3); }
 
-	void assert_stack() { assert(jmp_reg.bp > 0 && jmp_reg.sp > 0); }
+	void assert_stack() 
+	{
+		assert(jmp_reg.bp > 0 && jmp_reg.sp > 0 && jmp_reg.ip > 0); 
+	}
 
     void * get_jmp_buf() { return std::launder(&jmp_reg); }
 };

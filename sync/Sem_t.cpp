@@ -3,6 +3,7 @@
 //
 
 #include <mutex>
+#include <memory_resource>
 
 #include "../include/CoPrivate.h"
 #include "include/Sem_t.h"
@@ -81,7 +82,11 @@ void Sem_t::release(Sem_t * sem)
 {
 	sem->~Sem_t();
 	if (sem->alloc) [[likely]]
-		sem->alloc->free_safe(sem);
+#ifdef __MEM_PMR__
+		sem->alloc->deallocate(sem, sizeof(Sem_t));
+#else
+		sem->alloc->deallocate(sem);
+#endif
 	else
 		std::free(sem);
 }

@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cstdint>
+#include <memory_resource>
 #include <queue>
 #include <memory>
 #include <unordered_set>
@@ -16,6 +17,8 @@
 #include "../../include/Coroutine.h"
 #include "../../utils/include/spin_lock.h"
 #include "../../include/CoDef.h"
+#include "../data_structure/include/ListLockFree.h"
+#include "utils.h"
 
 struct StackInfo
 {
@@ -33,9 +36,12 @@ struct StackInfo
 	uint8_t * stk{};
 	Co_t * occupy_co{};
 	uint8_t stk_status{FREED};
+	spin_lock m_lock;
 
 	StackInfo() { stk = static_cast<uint8_t *>(std::malloc(STACK_SIZE)); }
 	~StackInfo() { std::free(stk); }
+
+	std::unique_lock<spin_lock> tryLock() { return std::unique_lock(m_lock, std::try_to_lock); }
 
 	[[nodiscard]] uint8_t * get_stk_bp_ptr() const
 	{
@@ -47,12 +53,16 @@ struct StackInfo
 struct StackPool
 {
 	std::array<StackInfo, co::STATIC_STK_NUM> stk{};
-	MemoryPool dyn_stk_pool{co::MAX_STACK_SIZE * 2, false};
+
+#ifdef __MEM_PMR__
+	std::pmr::synchronized_pool_resource dyn_stk_saver_pool{get_default_pmr_opt()};
+#else
+	MemoryPool dyn_stk_saver_pool{co::MAX_STACK_SIZE * 2, false};
+#endif
 
 	spin_lock m_lock{};
-	std::vector<uint16_t> freed_stack{};
-	std::unordered_map<Co_t*, int> freed_co{};
-	std::unordered_map<Co_t*, int> running_co{};
+	ListLockFree<uint16_t> freed_stack{};
+	ListLockFree<uint16_t> released_co{};
 
 	StackPool();
 	void alloc_dyn_stk_mem(void * &mem_ptr, std::size_t size);
