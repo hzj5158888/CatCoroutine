@@ -29,8 +29,8 @@ private:
         };
 
         T data;
-        std::shared_ptr<Node> next{};
-        std::shared_ptr<Node> pred{};
+        std::atomic<Node *> next{};
+        std::atomic<Node *> pred{};
         std::atomic<uint8_t> m_flag{};
         spin_lock_type alter_lock{};
 
@@ -39,11 +39,10 @@ private:
         static Node * create(Allocator & alloc)
         {
             Node * ans = reinterpret_cast<Node*>(alloc.allocate(sizeof(Node)));
-            new (&ans->next) std::shared_ptr<Node>();
-            new (&ans->pred) std::shared_ptr<Node>();
+            new (&ans->next) std::atomic<Node*>();
+            new (&ans->pred) std::atomic<Node*>();
             new (&ans->alter_lock) spin_lock();
             new (&ans->m_flag) std::atomic<uint8_t>();
-
             return ans;
         }
 
@@ -58,9 +57,9 @@ private:
             if (!validNode(this))
                 return nullptr;
 
-            Node * v_next = std::atomic_load(&next, std::memory_order_acquire);
+            Node * v_next = next.load(std::memory_order_acquire);
             while (v_next && v_next->removal())
-                v_next = std::atomic_load(&next, std::memory_order_acquire);
+                v_next = next.load(std::memory_order_acquire);
 
             return v_next;
         }
@@ -101,7 +100,7 @@ private:
     }
 
     /* 头插法 */
-    std::shared_ptr<Node> head{}, tail{};
+    std::atomic<Node *> head{}, tail{};
     std::atomic<size_t> m_size{0};
     Recycler<Node, Allocator> recycler{1};
 public:
@@ -155,9 +154,7 @@ public:
 
     ListLockFree()
     {
-        auto ptr = recycler.allocate(NODE_TYPE);
-        std::atomic_store(&head, ptr);
-        std::atomic_store(&tail, ptr);
+        head = tail = recycler.allocate(NODE_TYPE);
     }
 
     ~ListLockFree()
