@@ -39,7 +39,7 @@ class Sleeper
 class spin_lock_sleep
 {
 private:
-	std::atomic<bool> m_lock{false};
+	bool m_lock{false};
 	std::chrono::nanoseconds kMinYieldingSleep = std::chrono::microseconds(500);
 public:
 	spin_lock_sleep() = default;
@@ -48,14 +48,15 @@ public:
 	void lock() noexcept
 	{
 		Sleeper sleeper{kMinYieldingSleep};
+		auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
 		for (;;)
 		{
 			// Optimistically assume the lock is free on the first try
-			if (!m_lock.exchange(true, std::memory_order_acquire))
+			if (!lock->exchange(true, std::memory_order_acquire))
 				return;
 
 			// Wait for lock to be released without generating cache misses
-			while (m_lock.load(std::memory_order_relaxed))
+			while (lock->load(std::memory_order_relaxed))
 			{
 				// Issue X86 PAUSE or ARM YIELD instruction to reduce contention between
 				// hyper-threads
@@ -66,14 +67,16 @@ public:
 
 	bool try_lock() noexcept
 	{
+		auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
 		// First do a relaxed load to check if lock is free in order to prevent
 		// unnecessary cache misses if someone does while(!try_lock())
-		return !m_lock.load(std::memory_order_relaxed) &&
-			!m_lock.exchange(true, std::memory_order_acquire);
+		return !lock->load(std::memory_order_relaxed) &&
+			!lock->exchange(true, std::memory_order_acquire);
 	}
 
 	void unlock() noexcept
 	{
-		m_lock.store(false, std::memory_order_release);
+		auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
+		lock->store(false, std::memory_order_release);
 	}
 };

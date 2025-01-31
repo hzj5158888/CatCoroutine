@@ -109,10 +109,10 @@ public:
     {
     public:
         Node * self{};
-        bool m_lock{};
+        spin_lock_type m_lock{};
 
-        iterator() { new (&m_lock) spin_lock_type(); };
-        explicit iterator(Node * self) : self(self) { new (&m_lock) spin_lock_type(); }
+        iterator() = default;
+        explicit iterator(Node * self) : self(self) {}
         iterator(iterator && oth) = default;
         iterator(const iterator & oth) = default;
 
@@ -126,8 +126,7 @@ public:
 
         std::unique_lock<spin_lock_type> tryLock()
         {
-            auto lock = reinterpret_cast<spin_lock_type*>(&m_lock);
-            return std::unique_lock(*lock, std::try_to_lock);
+            return std::unique_lock(m_lock, std::try_to_lock);
         }
 
         T & operator -> () { return atomic_self()->load(std::memory_order_acquire)->data; }

@@ -16,7 +16,7 @@
 using moodycamel::ConcurrentQueue;
 using moodycamel::ConcurrentQueueDefaultTraits;
 
-template<typename NodeType, typename Allocator, size_t LIFE_CYCLE = 8192>
+template<typename NodeType, typename Allocator, size_t LIFE_CYCLE = 8 * 1024>
 class Recycler
 {
 private:
@@ -60,6 +60,11 @@ public:
         }
     }
 
+    bool needToDelete(const info & x)
+    {
+        return this->time_stamp.load(std::memory_order_acquire) - x.time > LIFE_CYCLE;
+    }
+
     void pool_add_node(const size_t type, const info & node_info)
     {
         auto & q = pool[type];
@@ -78,11 +83,6 @@ public:
     template<typename ... Args>
     NodeType * allocate(const size_t type, Args &&... args)
     {
-        auto needToDelete = [this] (const info & x) -> bool
-        {
-            return this->time_stamp.load(std::memory_order_acquire) - x.time > LIFE_CYCLE;
-        };
-
         info node_info{};
         if (pool[type].size_approx() > TRY_RECYCLE_SIZE && pool[type].try_dequeue(node_info))
         {
