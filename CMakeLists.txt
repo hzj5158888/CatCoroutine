@@ -46,11 +46,15 @@ set(TEST_PATH ${SRC}/test)
 include_directories(${TEST_PATH}/include)
 aux_source_directory(${TEST_PATH} test)
 
+# boost
+find_package(Boost REQUIRED)
+include_directories(${Boost_INCLUDE_DIRS})
+
 # exec
 enable_language(ASM-ATT)
 set(CMAKE_CXX_COMPILER /usr/bin/clang++-18)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -Wall -fsanitize=thread -fno-omit-frame-pointer")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -fsanitize=address -Wall -fno-omit-frame-pointer")
 add_executable(Coroutine ${main} ${data_structure} ${allocator} ${context} ${utils} ${sched} ${sync} ${test})
 
 # basic configuration
@@ -63,6 +67,9 @@ add_compile_definitions(__DEBUG__)
 # memory pool
 #add_compile_definitions(__MEM_PMR__)
 
+# Recycler lock free
+#add_compile_definitions(__RECYCLER_LF__)
+
 # scheduler data structure
 #add_compile_definitions(__SCHED_RB_TREE__)
 add_compile_definitions(__SCHED_HEAP__)
@@ -74,4 +81,4 @@ add_compile_definitions(__SCHED_HEAP__)
 add_compile_definitions(__STACK_STATIC__)
 
 # pthread
-target_link_libraries(Coroutine pthread)
+target_link_libraries(Coroutine pthread ${Boost_LIBRARIES})

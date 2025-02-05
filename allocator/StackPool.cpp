@@ -13,13 +13,16 @@
 #include "../utils/include/spin_lock.h"
 #include "../include/CoPrivate.h"
 #include "include/StackPool.h"
+#include "BitSetLockFree.h"
+#include "Coroutine.h"
 #include "ListLockFree.h"
 #include "include/MemoryPool.h"
+#include "utils.h"
 
 StackPool::StackPool()
 {
-	for (size_t i = 0; i < co::STATIC_STK_NUM; i++)
-		freed_stack.push_back(i);
+	for (auto i = 0; i < co::STATIC_STK_NUM; i++)
+		freed_stack.set(i, true);
 }
 
 void StackPool::alloc_dyn_stk_mem(void * &mem_ptr, std::size_t size)
@@ -58,72 +61,54 @@ void StackPool::write_back(StackInfo * info)
 
 void StackPool::alloc_static_stk(Co_t * co)
 {
-	int stk_idx{-1};
-	uint8_t * stk_ptr{};
-	std::optional<uint16_t> stk_idx_opt;
-	/* coroutine在freed co集合 */
-	auto iter = co->ctx.freed_co_iter;
-	std::unique_lock<spin_lock> stk_guard;
-	if (co->ctx.freed_co_iter.valid() && (stk_guard = stk[*iter].tryLock()).owns_lock())
-	{
-		stk_idx = *iter;
-		released_co.try_erase(iter);
-		co->ctx.freed_co_iter = {};
-		stk_ptr = stk[stk_idx].get_stk_bp_ptr();
-		goto exit;
-	}
-	if (stk_guard.owns_lock())
-		stk_guard.unlock();
+	std::lock_guard lock(m_lock);
 
-	if ((stk_idx_opt = freed_stack.try_pop_front()).has_value())
+	uint8_t * stk_ptr{};
+	int32_t stk_idx{BitSetLockFree<>::INVAILD_INDEX};
+	/* coroutine在freed co集合 */
+	if (co->ctx.occupy_stack == BitSetLockFree<>::INVAILD_INDEX && (stk_idx = freed_stack.change_first_expect(true, false)) != BitSetLockFree<>::INVAILD_INDEX)
 	{
-		stk_idx = stk_idx_opt.value();
 		stk_ptr = stk[stk_idx].get_stk_bp_ptr();
 		if (co->ctx.stk_dyn_size > 0)
 		{
 			auto dyn_size = co->ctx.stk_dyn_size;
 			std::memcpy(stk_ptr - dyn_size, co->ctx.stk_dyn_mem, dyn_size);
 		}
+	} else if ((stk_idx = co->ctx.occupy_stack) != BitSetLockFree<>::INVAILD_INDEX && released_co.compare_exchange(co->ctx.occupy_stack, true, false))
+	{
+		stk_ptr = stk[stk_idx].get_stk_bp_ptr();
 	} else {
+		/* 从上一个条件跳转而来 */
+		/* coroutine占有的stack正在被写回 */
+		if (stk_idx != BitSetLockFree<>::INVAILD_INDEX)
+			stk[stk_idx].wait_write_back();
+
 		while (true)
 		{
-			for (auto iter = released_co.begin(); iter.valid(); iter++)
+			stk_idx = released_co.change_first_expect_then(true, false, 
+				[this](int32_t idx) { stk[idx].lock_write_back(); }
+			);
+			if (stk_idx == BitSetLockFree<>::INVAILD_INDEX)
+				continue;
+
+			auto info = std::addressof(stk[stk_idx]);
+			write_back(info);
+			info->occupy_co->ctx.occupy_stack = BitSetLockFree<>::INVAILD_INDEX;
+			info->occupy_co = nullptr;
+			info->unlock_write_back();
+
+			stk_ptr = stk[stk_idx].get_stk_bp_ptr();
+			if (co->ctx.stk_dyn_size > 0)
 			{
-				auto iter_guard = iter.tryLock();
-				if (!iter_guard.owns_lock())
-					continue;
-
-				uint16_t freed_co_idx = *iter;
-				auto info = &stk[freed_co_idx];
-				auto guard = info->tryLock();
-				if (!guard.owns_lock() || !info->occupy_co->stk_active_lock.try_lock())
-					continue;
-
-				write_back(info);
-				info->occupy_co->ctx.occupy_stack = -1;
-				info->occupy_co->ctx.freed_co_iter = {};
-				info->occupy_co->stk_active_lock.unlock();
-				info->occupy_co = nullptr;
-
-				/* 删除节点 */
-				released_co.try_erase(iter);
-
-				stk_idx = freed_co_idx;
-				stk_ptr = stk[stk_idx].get_stk_bp_ptr();
-				if (co->ctx.stk_dyn_size > 0)
-				{
-					auto dyn_size = co->ctx.stk_dyn_size;
-					std::memcpy(stk_ptr - dyn_size, co->ctx.stk_dyn_mem, dyn_size);
-				}
-
-				break;
+				auto dyn_size = co->ctx.stk_dyn_size;
+				std::memcpy(stk_ptr - dyn_size, co->ctx.stk_dyn_mem, dyn_size);
 			}
-			if (stk_idx != -1)
-				break;
+
+			break;
 		}
 	}
 
-exit:
+	DASSERT(stk_idx != BitSetLockFree<>::INVAILD_INDEX);
 	stk[stk_idx].occupy_co = co;
 	stk[stk_idx].stk_status = StackInfo::ACTIVE;
 	co->ctx.occupy_stack = stk_idx;
@@ -134,10 +119,12 @@ exit:
 /* coroutine stack 一定不在 released 队列 */
 void StackPool::destroy_stack(Co_t * co)
 {
+	std::lock_guard lock(m_lock);
+
 	int stk_idx = co->ctx.occupy_stack;
 	stk[stk_idx].stk_status = StackInfo::FREED;
 	stk[stk_idx].occupy_co = nullptr;
-	freed_stack.push_back(stk_idx);
+	freed_stack.set(stk_idx, true);
 
 	if (co->ctx.stk_dyn_mem != nullptr)
 #ifdef __MEM_PMR__
@@ -156,17 +143,18 @@ void StackPool::destroy_stack(Co_t * co)
 	co->ctx.stk_size = 0;
 	co->ctx.stk_is_static = false;
 	co->ctx.stk_real_bottom = nullptr;
-	co->ctx.occupy_stack = -1;
-	co->ctx.freed_co_iter = {};
+	co->ctx.occupy_stack = BitSetLockFree<>::INVAILD_INDEX;
 }
 
-/* 由coroutine自己主动调用 */
+/* 由coroutine主动调用 */
 /* 前提，coroutine stack空闲 */
 void StackPool::release_stack(Co_t * co)
 {
+	std::lock_guard lock(m_lock);
+	
 	int stk_idx = co->ctx.occupy_stack;
 	stk[stk_idx].stk_status = StackInfo::RELEASED;
-	co->ctx.freed_co_iter = released_co.push_back(stk_idx);
+	released_co.set(stk_idx, true);
 }
 
 void StackPool::setup_co_static_stk(Co_t* co, uint8_t * stk)

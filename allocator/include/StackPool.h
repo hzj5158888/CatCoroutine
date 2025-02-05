@@ -6,6 +6,7 @@
 
 #include <cstdint>
 #include <memory_resource>
+#include <mutex>
 #include <queue>
 #include <memory>
 #include <unordered_set>
@@ -18,6 +19,7 @@
 #include "../../utils/include/spin_lock.h"
 #include "../../include/CoDef.h"
 #include "../data_structure/include/ListLockFree.h"
+#include "../data_structure/include/BitSetLockFree.h"
 #include "utils.h"
 
 struct StackInfo
@@ -36,12 +38,14 @@ struct StackInfo
 	uint8_t * stk{};
 	Co_t * occupy_co{};
 	uint8_t stk_status{FREED};
-	spin_lock m_lock;
+	spin_lock m_write_back_lock{};
 
 	StackInfo() { stk = static_cast<uint8_t *>(std::malloc(STACK_SIZE)); }
 	~StackInfo() { std::free(stk); }
 
-	std::unique_lock<spin_lock> tryLock() { return std::unique_lock(m_lock, std::try_to_lock); }
+	void wait_write_back() { m_write_back_lock.lock(); m_write_back_lock.unlock(); }
+	void lock_write_back() { m_write_back_lock.lock(); }
+	void unlock_write_back() { m_write_back_lock.unlock(); }
 
 	[[nodiscard]] uint8_t * get_stk_bp_ptr() const
 	{
@@ -61,8 +65,8 @@ struct StackPool
 #endif
 
 	spin_lock m_lock{};
-	ListLockFree<uint16_t> freed_stack{};
-	ListLockFree<uint16_t> released_co{};
+	BitSetLockFree<co::STATIC_STK_NUM> freed_stack{};
+	BitSetLockFree<co::STATIC_STK_NUM> released_co{};
 
 	StackPool();
 	void alloc_dyn_stk_mem(void * &mem_ptr, std::size_t size);

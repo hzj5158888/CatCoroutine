@@ -16,9 +16,9 @@ template<typename T, typename Allocator = std::allocator<uint8_t>>
 class ListLockFree
 {
 private:
-    using spin_lock_type = spin_lock;
+    constexpr static uint8_t LIST_NODE_TYPE = 1;
 
-    constexpr static uint8_t NODE_TYPE = 1;
+    using spin_lock_type = spin_lock;
 
     struct Node
     {
@@ -41,7 +41,7 @@ private:
             Node * ans = reinterpret_cast<Node*>(alloc.allocate(sizeof(Node)));
             new (&ans->next) std::atomic<Node*>();
             new (&ans->pred) std::atomic<Node*>();
-            new (&ans->alter_lock) spin_lock();
+            new (&ans->alter_lock) spin_lock_type();
             new (&ans->m_flag) std::atomic<uint8_t>();
             return ans;
         }
@@ -59,7 +59,7 @@ private:
 
             Node * v_next = next.load(std::memory_order_acquire);
             while (v_next && v_next->removal())
-                v_next = next.load(std::memory_order_acquire);
+                v_next = next.load(std::memory_order_relaxed);
 
             return v_next;
         }
@@ -102,7 +102,7 @@ private:
     /* 头插法 */
     std::atomic<Node *> head{}, tail{};
     std::atomic<size_t> m_size{0};
-    Recycler<Node, Allocator> recycler{1};
+    Recycler<Node, Allocator, LIST_NODE_TYPE> recycler;
 public:
     /* 迭代器存储目标节点的 **上一个** 节点 */
     class iterator
@@ -153,7 +153,7 @@ public:
 
     ListLockFree()
     {
-        head = tail = recycler.allocate(NODE_TYPE);
+        head = tail = recycler.allocate(LIST_NODE_TYPE);
     }
 
     ~ListLockFree()
@@ -163,7 +163,7 @@ public:
         {
             cur->alter_lock.lock();
             Node * next = cur->next;
-            recycler.deallocate(NODE_TYPE, cur);
+            recycler.deallocate(LIST_NODE_TYPE, cur);
             cur = next;
         }
 
@@ -174,7 +174,7 @@ public:
     template<typename V>
     iterator push_back(V data)
     {
-        Node * cur = recycler.allocate(NODE_TYPE);
+        Node * cur = recycler.allocate(LIST_NODE_TYPE);
         cur->data = std::forward<V>(data);
 
         Node * cur_tail{};
@@ -206,8 +206,8 @@ public:
             if (empty())
                 return std::nullopt;
 
-            Node * cur_head = head.load(std::memory_order_relaxed);
-            Node * self = cur_head->next.load(std::memory_order_acquire);
+            Node * cur_head = head.load(std::memory_order_acquire);
+            Node * self = cur_head->next.load(std::memory_order_relaxed);
             
             bool isMarked = false;
             Node * nodeToDel = nullptr;
@@ -252,7 +252,7 @@ public:
                 continue;
 
             std::optional<T> ans{std::move(nodeToDel->data)};
-            recycler.deallocate(NODE_TYPE, nodeToDel);
+            recycler.deallocate(LIST_NODE_TYPE, nodeToDel);
             m_size.fetch_sub(1, std::memory_order_acq_rel);
             return ans;
         }
@@ -302,7 +302,7 @@ public:
             break;
         }
 
-        recycler.deallocate(NODE_TYPE, nodeToDel);
+        recycler.deallocate(LIST_NODE_TYPE, nodeToDel);
         m_size.fetch_sub(1, std::memory_order_acq_rel);
         return true;
     }

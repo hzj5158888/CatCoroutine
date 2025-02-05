@@ -26,6 +26,7 @@ void CfsSchedManager::apply(Co_t * co)
 	{
 		auto & scheduler = schedulers[i];
 		uint64_t balance = scheduler->sum_v_runtime.load(std::memory_order_relaxed);
+		balance += scheduler->ready.size();
 
 		//std::cout << "<" << balance << ", " << i << ">" << std::endl;
 

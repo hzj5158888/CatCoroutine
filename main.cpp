@@ -1,7 +1,5 @@
 #include <iostream>
-#include <memory_resource>
-#include <stack>
-#include <map>
+#include <bitset>
 #include <thread>
 #include <vector>
 
@@ -59,21 +57,4 @@ int main()
 	co::init();
     std::cout << "coroutine initilization compelete" << std::endl;
 	test();
-
-	/*
-	SkipListLockFree<int, std::greater<>> sk;
-	for (int i = 0; i < 100; i++)
-		sk.push(i);
-
-	sk.push(99);
-
-	while (sk.size() > 0)
-	{
-		auto top = sk.front();
-		sk.erase(top);
-
-		std::cout << top << std::endl;
-	}
-    return 0;
-    */
 }

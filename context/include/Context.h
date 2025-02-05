@@ -15,6 +15,7 @@
 #include "../allocator/include/MemoryPool.h"
 #include "../allocator/include/StackPoolDef.h"
 #include "../allocator/include/DynStackPoolDef.h"
+#include "Coroutine.h"
 
 constexpr std::size_t SAVE_SIG_MASK = 1;
 constexpr std::size_t SIGSET_WORDS = (1024 / (8 * sizeof (unsigned long int)));
@@ -35,7 +36,6 @@ struct Context
 	int32_t occupy_stack{-1};
 	uint8_t * stk_real_bottom{}; // real stack bottom
 	std::size_t stk_size{};
-	ListLockFree<uint16_t>::iterator freed_co_iter{};
 
     uint8_t * stk_dyn{};
 	void * stk_dyn_mem{};
@@ -57,14 +57,14 @@ struct Context
         uint64_t bp;
         uint64_t r12, r13, r14, r15;
         uint64_t sp;
-        uint64_t ip; // rip, program counter
+        uint64_t ip; 	// rip, program counter
 		uint32_t mxcsr; // sse2 control and status word, offset=64
 		uint16_t x87cw; // x87 fpu control word, offset=68
 #else
         void * bx;
         void * si, * di; // index register
         void * bp, * sp; // stack
-        void * ip; // eip
+        void * ip; 		 // eip
 #endif
     } jmp_reg{};
 
@@ -120,6 +120,7 @@ struct Context
 	void assert_stack() 
 	{
 		assert(jmp_reg.bp > 0 && jmp_reg.sp > 0 && jmp_reg.ip > 0); 
+		assert(jmp_reg.bp - jmp_reg.sp <= co::MAX_STACK_SIZE);
 	}
 
     void * get_jmp_buf() { return std::launder(&jmp_reg); }

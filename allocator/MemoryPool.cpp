@@ -188,6 +188,7 @@ void MemoryPool::deallocate(void *unit_pointer_start)
     SMemoryBlockHeader* block = unit->container;
 
     // If last in block, then reset offset
+    m_lock.lock();
     if (reinterpret_cast<char*>(block) + sizeof(SMemoryBlockHeader) + block->offset == reinterpret_cast<char*>(unit) + sizeof(SMemoryUnitHeader) + unit->length) 
     {
         block->offset -= sizeof(SMemoryUnitHeader) + unit->length;
@@ -196,7 +197,6 @@ void MemoryPool::deallocate(void *unit_pointer_start)
         block->numberOfDeleted++;
 
     // If block offset is 0 remove block if not the only one left
-    m_lock.lock();
     if (this->currentBlock != this->firstBlock && (block->offset == 0 || block->numberOfAllocated == block->numberOfDeleted)) 
     {
         if (block == this->firstBlock) 

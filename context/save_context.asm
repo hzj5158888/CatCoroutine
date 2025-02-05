@@ -11,9 +11,9 @@ save_context:
     mov %r15, 40(%rdi)
     stmxcsr   64(%rdi) /* mxcsr寄存器, **4Byte** */
     fnstcw    68(%rdi) /* x87 fpu control word, **2Byte** */
-    /* call instruction push rip into stack, which effort stack save */
-    /* stack 0, the pc of save_context() */
-    pop %rax            /* pop and throw it */
+    /* call instruction push rip into stack, which will effort stack save */
+    /* stack top, pc of save_context() */
+    pop %rax            /* pop it */
     mov %rax, 56(%rdi)  /* save rip */
     mov %rsp, 48(%rdi)  /* save rsp */
     xor %rax, %rax      /* set return value */

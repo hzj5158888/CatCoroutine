@@ -11,6 +11,7 @@
 #include <cassert>
 #include <cstdint>
 #include <memory_resource>
+#include <type_traits>
 
 #define LIKELY(x) (__builtin_expect((x), 1))
 #define UNLIKELY(x) (__builtin_expect((x), 0))
