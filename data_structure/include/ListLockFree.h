@@ -102,7 +102,7 @@ private:
     /* 头插法 */
     std::atomic<Node *> head{}, tail{};
     std::atomic<size_t> m_size{0};
-    Recycler<Node, Allocator, LIST_NODE_TYPE> recycler;
+    Recycler<Node, Allocator, LIST_NODE_TYPE> recycler{};
 public:
     /* 迭代器存储目标节点的 **上一个** 节点 */
     class iterator

@@ -4,8 +4,6 @@
 
 #include "include/CoPrivate.h"
 
-Co_t::Co_t() {}
-
 bool Co_t::operator > (const Co_t & oth) const 
 {  
     sched.prefetch_v_runtime();

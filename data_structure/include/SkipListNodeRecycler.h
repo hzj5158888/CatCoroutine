@@ -33,10 +33,10 @@ private:
         info(const uint64_t time, NodeType * node) : time(time), node(node) {}
     };
 
-    spin_lock m_lock;
+    spin_lock m_lock{};
     std::atomic<uint64_t> time_stamp{};
-    Allocator alloc;
-    std::vector<ConcurrentQueue<info>> pool;
+    Allocator alloc{};
+    std::vector<ConcurrentQueue<info>> pool{};
 public:
     NodeRecycler() = delete;
     explicit NodeRecycler(const size_t max_height)

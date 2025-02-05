@@ -10,8 +10,7 @@
 
 void CfsSchedManager::apply(Co_t * co)
 {
-	init_lock.lock();
-	init_lock.unlock();
+	init_lock.wait_until_lockable();
 
 	// 协程运行中
 	if (co->status == CO_RUNNING) [[unlikely]]
@@ -26,7 +25,7 @@ void CfsSchedManager::apply(Co_t * co)
 	{
 		auto & scheduler = schedulers[i];
 		uint64_t balance = scheduler->sum_v_runtime.load(std::memory_order_relaxed);
-		balance += scheduler->ready.size();
+		balance += scheduler->ready_count.load(std::memory_order_acquire);
 
 		//std::cout << "<" << balance << ", " << i << ">" << std::endl;
 

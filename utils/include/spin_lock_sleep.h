@@ -12,8 +12,8 @@
 
 class Sleeper 
 {
-	const std::chrono::nanoseconds delta;
-	uint32_t spinCount;
+	const std::chrono::nanoseconds delta{};
+	uint32_t spinCount{};
 
 	static constexpr uint32_t kMaxActiveSpin = 8000;
 

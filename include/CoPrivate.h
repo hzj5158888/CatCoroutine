@@ -67,28 +67,14 @@ struct Co_t
 	alignas(__CACHE_LINE__) CfsSchedEntity sched{}; 
 	std::shared_ptr<CfsScheduler> scheduler{};
 
-	Co_t();
+	Co_t() = default;
 	Co_t(const Co_t & oth) = delete;
 	Co_t(Co_t && oth) = delete;
 	~Co_t() = default;
 
-    void set_id(uint32_t co_id) { id = co_id; }
-
 	bool operator > (const Co_t & oth) const;
 	bool operator < (const Co_t & oth) const;
-	static void operator delete (void * ptr) noexcept
-	{
-		Co_t * co = static_cast<Co_t*>(ptr);
-		auto alloc = co->allocator;
-		if (alloc)
-#ifdef __MEM_PMR__
-			alloc->deallocate(co, sizeof(Co_t));
-#else
-			alloc->deallocate(co);
-#endif
-		else
-			std::free(co);
-	}
+	void operator delete (void * ptr) noexcept = delete;
 };
 
 template<>
@@ -107,7 +93,6 @@ struct local_t
 namespace co_ctx
 {
 	extern bool is_init;
-	extern std::unique_ptr<Context> manger_ctx;
 	extern std::shared_ptr<CfsSchedManager> manager;
 	extern std::atomic<uint32_t> coroutine_count;
 	extern thread_local std::shared_ptr<local_t> loc;

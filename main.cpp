@@ -5,6 +5,7 @@
 
 #include "./include/Coroutine.h"
 #include "test/include/test.h"
+#include "../data_structure/include/BitSetLockFree.h"
 #include "../data_structure/include/ListLockFree.h"
 
 void list_free_test()
@@ -48,11 +49,44 @@ void list_free_test()
 	std::cout << list.size() << std::endl;
 }
 
+void bitset_test()
+{
+	std::cout << "bitset test" << std::endl;
+
+	constexpr auto bits = 1024;
+	BitSetLockFree<bits> bs;
+
+	std::vector<int> idx;
+	for (int i = 0; i < bits; i++)
+	{
+		if (rand() & 1)
+		{
+			bs.set(i, true);
+			idx.push_back(i);
+		}
+	}
+
+	for (auto i : idx)
+	{
+		assert(bs.get(i));
+	}
+
+	std::cout << idx.size() << std::endl;
+
+	for (auto i : idx)
+	{
+		std::cout << i << std::endl;
+		auto cur = bs.change_first_expect(true, false);
+		assert(cur == i);
+	}
+}
+
 int main()
 {
 	std::cout << "main entry" << std::endl;
 
 	//list_free_test();
+	//bitset_test();
 
 	co::init();
     std::cout << "coroutine initilization compelete" << std::endl;

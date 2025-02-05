@@ -29,6 +29,7 @@ void CfsScheduler::apply_ready(Co_t * co)
 	sched_lock.unlock();
 #endif
 
+	ready_count.fetch_add(1, std::memory_order_acq_rel);
 	sem_ready.signal();
 }
 
@@ -77,6 +78,7 @@ void CfsScheduler::remove_from_scheduler(Co_t * co)
 Co_t * CfsScheduler::pickup_ready()
 {
 	sem_ready.wait();
+	ready_count.fetch_sub(1, std::memory_order_acq_rel);
 
 #ifdef __SCHED_SKIP_LIST__
 	auto ans = ready.front();

@@ -54,11 +54,11 @@ include_directories(${Boost_INCLUDE_DIRS})
 enable_language(ASM-ATT)
 set(CMAKE_CXX_COMPILER /usr/bin/clang++-18)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -fsanitize=address -Wall -fno-omit-frame-pointer")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -fsanitize=address -fsanitize-recover=all -Wall -fno-omit-frame-pointer")
 add_executable(Coroutine ${main} ${data_structure} ${allocator} ${context} ${utils} ${sched} ${sync} ${test})
 
 # basic configuration
-add_compile_definitions(__CPU_CORE__=8)
+add_compile_definitions(__CPU_CORE__=1)
 add_compile_definitions(__CACHE_LINE__=64)
 
 # debug flag

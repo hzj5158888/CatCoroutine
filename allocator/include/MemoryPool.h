@@ -80,15 +80,15 @@ struct SMemoryBlockHeader {
         static_assert(((ALIGN - 1) & ALIGN) == 0);
 
         // Data about the memory pool blocks
-        SMemoryBlockHeader* firstBlock;
-        SMemoryBlockHeader* currentBlock;
-        size_t defaultBlockSize;
+        SMemoryBlockHeader* firstBlock{};
+        SMemoryBlockHeader* currentBlock{};
+        size_t defaultBlockSize{};
 
         // Data about memory scopes
-        SMemoryScopeHeader* currentScope;
+        SMemoryScopeHeader* currentScope{};
 
-        bool single_block;
-		spin_lock m_lock;
+        bool single_block{};
+		spin_lock m_lock{};
 
         /**
          * Create a new standalone memory block unattached to any memory pool

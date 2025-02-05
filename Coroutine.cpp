@@ -108,17 +108,24 @@ namespace co {
 	{
 		auto co = static_cast<Co_t*>(handle);
 		/* 等待状态更新 */
-		co->status_lock.lock();
+		co->status_lock.wait_until_lockable();
 		if (co->status != CO_DEAD) [[unlikely]]
-		{
-			co->status_lock.unlock();
 			throw DestroyBeforeCloseException();
-		}
-		co->status_lock.unlock();
 
 		/* do not delete Main co */
 		if (co->id != MAIN_CO_ID) [[likely]]
-			delete co;
+		{
+			auto alloc = co->allocator;
+			co->~Co_t();
+			if (alloc)
+#ifdef __MEM_PMR__
+				alloc->deallocate(co, sizeof(Co_t));
+#else
+				alloc->deallocate(co);
+#endif
+			else
+				std::free(co);
+		}
 	}
 
     void * create(void (*func)(void *), void * arg, int nice)

@@ -63,6 +63,7 @@ public:
 	SkipListLockFree<Co_t*, CoPtrLessCmp> ready{};
 #endif
 	counting_semaphore sem_ready{};
+	std::atomic<uint64_t> ready_count{};
 	std::shared_ptr<CfsSchedManager> manager{};
 	Co_t * running_co{};
 	Co_t * await_callee{};
@@ -85,10 +86,8 @@ public:
 class CfsSchedManager
 {
 public:
-	using CoReadyIter = std::multiset<Co_t*, CoPtrLessCmp>::iterator;
-
 	constexpr static uint64_t INF = 0x3f3f3f3f3f3f3f3f;
-	std::vector<std::shared_ptr<CfsScheduler>> schedulers;
+	std::vector<std::shared_ptr<CfsScheduler>> schedulers{};
 	spin_lock init_lock{};
 	spin_lock w_lock{};
 

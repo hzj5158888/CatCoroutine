@@ -43,7 +43,7 @@ struct StackInfo
 	StackInfo() { stk = static_cast<uint8_t *>(std::malloc(STACK_SIZE)); }
 	~StackInfo() { std::free(stk); }
 
-	void wait_write_back() { m_write_back_lock.lock(); m_write_back_lock.unlock(); }
+	void wait_write_back() { m_write_back_lock.wait_until_lockable(); }
 	void lock_write_back() { m_write_back_lock.lock(); }
 	void unlock_write_back() { m_write_back_lock.unlock(); }
 

@@ -51,6 +51,12 @@ public:
 		auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
 		return !lock->load(std::memory_order_acquire);
 	}
+
+	void wait_until_lockable() noexcept
+	{
+		lock();
+		unlock();
+	}
 };
 
 #endif //COROUTINE_UTILS_INCLUDE_SPIN_LOCK_H

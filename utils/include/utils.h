@@ -37,6 +37,13 @@ AddressType get_member_func_addr(FuncPtrType func_ptr) // 不能在继承类使�
 template<typename T> constexpr bool is_tuple_v = false;
 template<typename... T> constexpr bool is_tuple_v<std::tuple<T...>> = true;
 
+template<typename T>
+struct is_lambda :
+	std::integral_constant<bool, std::is_class_v<T> && !std::is_same_v<T, std::decay_t<T>>> {};
+
+template<typename T>
+constexpr bool is_lambda_v = is_lambda<T>::value;
+
 constexpr std::size_t ceil_pow_2(std::size_t x)
 {
 	uint8_t idx{};

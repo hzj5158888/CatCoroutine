@@ -4,8 +4,6 @@
 
 #pragma once
 
-
-
 #include "../allocator/include/StackPool.h"
 #include "../allocator/include/MemoryPool.h"
 #include "../allocator/include/DynStackPool.h"

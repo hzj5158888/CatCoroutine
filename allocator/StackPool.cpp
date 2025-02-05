@@ -2,10 +2,8 @@
 // Created by hzj on 25-1-14.
 //
 
-#include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <cstring>
 #include <cassert>
 #include <optional>
@@ -13,16 +11,12 @@
 #include "../utils/include/spin_lock.h"
 #include "../include/CoPrivate.h"
 #include "include/StackPool.h"
-#include "BitSetLockFree.h"
-#include "Coroutine.h"
-#include "ListLockFree.h"
-#include "include/MemoryPool.h"
-#include "utils.h"
+
 
 StackPool::StackPool()
 {
-	for (auto i = 0; i < co::STATIC_STK_NUM; i++)
-		freed_stack.set(i, true);
+	/* set all true */
+	freed_stack.flip();
 }
 
 void StackPool::alloc_dyn_stk_mem(void * &mem_ptr, std::size_t size)
@@ -63,10 +57,11 @@ void StackPool::alloc_static_stk(Co_t * co)
 {
 	std::lock_guard lock(m_lock);
 
+alloc_start:
 	uint8_t * stk_ptr{};
-	int32_t stk_idx{BitSetLockFree<>::INVAILD_INDEX};
+	int32_t stk_idx{BitSetLockFree<>::INVALID_INDEX};
 	/* coroutine在freed co集合 */
-	if (co->ctx.occupy_stack == BitSetLockFree<>::INVAILD_INDEX && (stk_idx = freed_stack.change_first_expect(true, false)) != BitSetLockFree<>::INVAILD_INDEX)
+	if (co->ctx.occupy_stack == BitSetLockFree<>::INVALID_INDEX && (stk_idx = freed_stack.change_first_expect(true, false)) != BitSetLockFree<>::INVALID_INDEX)
 	{
 		stk_ptr = stk[stk_idx].get_stk_bp_ptr();
 		if (co->ctx.stk_dyn_size > 0)
@@ -74,26 +69,29 @@ void StackPool::alloc_static_stk(Co_t * co)
 			auto dyn_size = co->ctx.stk_dyn_size;
 			std::memcpy(stk_ptr - dyn_size, co->ctx.stk_dyn_mem, dyn_size);
 		}
-	} else if ((stk_idx = co->ctx.occupy_stack) != BitSetLockFree<>::INVAILD_INDEX && released_co.compare_exchange(co->ctx.occupy_stack, true, false))
+	} else if ((stk_idx = co->ctx.occupy_stack) != BitSetLockFree<>::INVALID_INDEX && released_co.compare_exchange(stk_idx, true, false))
 	{
 		stk_ptr = stk[stk_idx].get_stk_bp_ptr();
 	} else {
 		/* 从上一个条件跳转而来 */
 		/* coroutine占有的stack正在被写回 */
-		if (stk_idx != BitSetLockFree<>::INVAILD_INDEX)
+		if (stk_idx != BitSetLockFree<>::INVALID_INDEX)
+		{
 			stk[stk_idx].wait_write_back();
+			goto alloc_start;
+		}
 
 		while (true)
 		{
 			stk_idx = released_co.change_first_expect_then(true, false, 
 				[this](int32_t idx) { stk[idx].lock_write_back(); }
 			);
-			if (stk_idx == BitSetLockFree<>::INVAILD_INDEX)
+			if (stk_idx == BitSetLockFree<>::INVALID_INDEX)
 				continue;
 
 			auto info = std::addressof(stk[stk_idx]);
 			write_back(info);
-			info->occupy_co->ctx.occupy_stack = BitSetLockFree<>::INVAILD_INDEX;
+			info->occupy_co->ctx.occupy_stack = BitSetLockFree<>::INVALID_INDEX;
 			info->occupy_co = nullptr;
 			info->unlock_write_back();
 
@@ -108,7 +106,7 @@ void StackPool::alloc_static_stk(Co_t * co)
 		}
 	}
 
-	DASSERT(stk_idx != BitSetLockFree<>::INVAILD_INDEX);
+	DASSERT(stk_idx != BitSetLockFree<>::INVALID_INDEX);
 	stk[stk_idx].occupy_co = co;
 	stk[stk_idx].stk_status = StackInfo::ACTIVE;
 	co->ctx.occupy_stack = stk_idx;
@@ -124,6 +122,7 @@ void StackPool::destroy_stack(Co_t * co)
 	int stk_idx = co->ctx.occupy_stack;
 	stk[stk_idx].stk_status = StackInfo::FREED;
 	stk[stk_idx].occupy_co = nullptr;
+	released_co.set(stk_idx, false);
 	freed_stack.set(stk_idx, true);
 
 	if (co->ctx.stk_dyn_mem != nullptr)
@@ -143,7 +142,7 @@ void StackPool::destroy_stack(Co_t * co)
 	co->ctx.stk_size = 0;
 	co->ctx.stk_is_static = false;
 	co->ctx.stk_real_bottom = nullptr;
-	co->ctx.occupy_stack = BitSetLockFree<>::INVAILD_INDEX;
+	co->ctx.occupy_stack = BitSetLockFree<>::INVALID_INDEX;
 }
 
 /* 由coroutine主动调用 */
