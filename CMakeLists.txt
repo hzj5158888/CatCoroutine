@@ -52,17 +52,17 @@ include_directories(${Boost_INCLUDE_DIRS})
 
 # exec
 enable_language(ASM-ATT)
-set(CMAKE_CXX_COMPILER /usr/bin/clang++-18)
+set(CMAKE_CXX_COMPILER /usr/bin/g++-13)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -fsanitize=address -fsanitize-recover=all -Wall -fno-omit-frame-pointer")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -Wall -Werror -fno-omit-frame-pointer")
 add_executable(Coroutine ${main} ${data_structure} ${allocator} ${context} ${utils} ${sched} ${sync} ${test})
 
 # basic configuration
-add_compile_definitions(__CPU_CORE__=1)
+add_compile_definitions(__CPU_CORE__=6)
 add_compile_definitions(__CACHE_LINE__=64)
 
 # debug flag
-add_compile_definitions(__DEBUG__)
+#add_compile_definitions(__DEBUG__)
 
 # memory pool
 #add_compile_definitions(__MEM_PMR__)
@@ -74,10 +74,11 @@ add_compile_definitions(__DEBUG__)
 #add_compile_definitions(__SCHED_RB_TREE__)
 add_compile_definitions(__SCHED_HEAP__)
 #add_compile_definitions(__SCHED_SKIP_LIST__)
-#add_compile_definitions(__SCHED_FIFO_QUEUE__)
+#add_compile_definitions(__SCHED_FIFO__)
 
 # stack allocate mode
 #add_compile_definitions(__STACK_DYN__)
+#add_compile_definitions(__STACK_DYN_MMAP__)
 add_compile_definitions(__STACK_STATIC__)
 
 # pthread

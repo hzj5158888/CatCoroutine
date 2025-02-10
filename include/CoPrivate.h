@@ -4,22 +4,14 @@
 #pragma once
 
 #include <cstdint>
-#include <memory>
-#include <utility>
 #include <queue>
 #include <atomic>
-#include <set>
 
 #include "../context/include/Context.h"
 #include "../include/Coroutine.h"
-#include "../utils/include/co_utils.h"
-#include "../utils/include/Result.h"
-#include "../data_structure/include/RingBuffer.h"
 #include "../allocator/include/MemoryPool.h"
 #include "../../sched/include/CfsSchedDef.h"
 #include "../../sched/include/CfsSchedEntity.h"
-#include "../../sync/include/Mutex.h"
-#include "AllocatorGroup.h"
 
 enum CO_STATUS
 {
@@ -65,7 +57,7 @@ struct Co_t
 
     // 调度信息
 	alignas(__CACHE_LINE__) CfsSchedEntity sched{}; 
-	std::shared_ptr<CfsScheduler> scheduler{};
+	CfsScheduler * scheduler{};
 
 	Co_t() = default;
 	Co_t(const Co_t & oth) = delete;
@@ -82,18 +74,3 @@ struct std::hash<Co_t>
 {
 	std::size_t operator() (const Co_t & oth) const noexcept { return oth.id; }
 };
-
-struct local_t
-{
-	std::thread::id thread_id{};
-	AllocatorGroup alloc{};
-	std::shared_ptr<CfsScheduler> scheduler{};
-};
-
-namespace co_ctx
-{
-	extern bool is_init;
-	extern std::shared_ptr<CfsSchedManager> manager;
-	extern std::atomic<uint32_t> coroutine_count;
-	extern thread_local std::shared_ptr<local_t> loc;
-}

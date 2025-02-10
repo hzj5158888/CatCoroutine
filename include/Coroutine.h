@@ -1,13 +1,8 @@
 #pragma once
 
-#include <memory_resource>
-#include <type_traits>
 #include <cstdint>
 #include <cxxabi.h>
-#include <memory>
-#include <future>
 #include <exception>
-#include <thread>
 
 #include "../utils/include/Invoker.h"
 #include "../sched/include/CfsSchedDef.h"
@@ -18,7 +13,7 @@ namespace co {
 	constexpr static uint64_t MAX_STACK_SIZE = 1024 * 1024 * 1; // 1 MB
 	constexpr static uint16_t CPU_CORE = __CPU_CORE__;
 	constexpr static uint64_t STATIC_STACK_SIZE = 1024 * 1024 * 8; // 8MB
-	constexpr static uint64_t STATIC_STK_NUM = std::max(CPU_CORE + 1, 64);
+	constexpr static uint64_t STATIC_STK_NUM = 256;
 	static_assert(CPU_CORE > 0);
 
 	class Co_UnInitialization_Exception : public std::exception

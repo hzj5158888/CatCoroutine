@@ -4,22 +4,27 @@
 
 #pragma once
 
-#include <iostream>
+#include <bits/types/struct_timeval.h>
+#include <cstddef>
+#include <cstdio>
 #include <execinfo.h>
 #include <cmath>
 #include <cxxabi.h>
 #include <cassert>
 #include <cstdint>
-#include <memory_resource>
 #include <type_traits>
+#include <sys/time.h>
+#include <memory_resource>
 
 #define LIKELY(x) (__builtin_expect((x), 1))
 #define UNLIKELY(x) (__builtin_expect((x), 0))
 
 #ifdef __DEBUG__
 #define DASSERT(expr) (assert(UNLIKELY(expr)))
+#define DEXPR(expr) expr
 #else
 #define DASSERT(expr)
+#define DEXPR(expr)
 #endif
 
 template<typename AddressType, typename FuncPtrType>
@@ -78,12 +83,29 @@ inline void print_trace()
 	printf("\n\n");
 }
 
-#ifdef __MEM_PMR__
-    inline std::pmr::pool_options get_default_pmr_opt()
-    {
-        return std::pmr::pool_options {
-            48,
-            1024 * 1024 * 4
-        };
-    }
-#endif
+template<typename T>
+constexpr int countl_zero(T x)
+{
+	if constexpr (sizeof(T) < sizeof(unsigned))
+		return x != 0 ? __builtin_clz(x) : sizeof(T) * 8; // fixup, __builtin_clz(0) == sizeof(T) * 8 - 1
+	else if constexpr (sizeof(T) == sizeof(unsigned))
+		return x != 0 ? __builtin_clzl(x) : sizeof(T) * 8; // fixup, __builtin_clzl(0) == sizeof(T) * 8 - 1
+	else if constexpr (sizeof(T) == sizeof(unsigned long long))
+		return x != 0 ? __builtin_clzll(x) : sizeof(T) * 8; // fixup, __builtin_clzll(0) == sizeof(T) * 8 - 1
+	else
+		static_assert(false);
+}
+
+template<typename T>
+constexpr int countl_one(T x)
+{
+	return countl_zero(~x);
+}
+
+inline std::pmr::pool_options get_default_pmr_opt()
+{
+    return std::pmr::pool_options {
+        48,
+        1024 * 1024 * 4
+    };
+}

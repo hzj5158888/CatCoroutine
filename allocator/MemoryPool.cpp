@@ -24,9 +24,9 @@
 #include "include/MemoryPool.h"
 #include <iostream>
 #include <mutex>
-#include <memory>
+#include <sys/mman.h>
 
-MemoryPool::MemoryPool(size_t block_size, bool single_block)
+MemoryPool::MemoryPool(size_t block_size, bool single_block, bool use_mmap, int mmap_flag)
 {
     // Add first block to memory pool
     this->firstBlock = this->currentBlock = nullptr;
@@ -34,6 +34,8 @@ MemoryPool::MemoryPool(size_t block_size, bool single_block)
     this->currentScope = nullptr;
     this->createMemoryBlock(block_size);
     this->single_block = single_block;
+    this->use_mmap = use_mmap;
+    this->mmap_flag = mmap_flag;
 }
 
 MemoryPool::~MemoryPool() {
@@ -49,7 +51,12 @@ MemoryPool::~MemoryPool() {
 void MemoryPool::createMemoryBlock(size_t block_size)
 {
     // Create the block
-    auto* block = reinterpret_cast<SMemoryBlockHeader*>(std::malloc(sizeof(SMemoryBlockHeader) + block_size));
+    SMemoryBlockHeader * block{};
+    if (!use_mmap)
+        block = reinterpret_cast<SMemoryBlockHeader*>(std::malloc(sizeof(SMemoryBlockHeader) + block_size));
+    else
+        block = reinterpret_cast<SMemoryBlockHeader*>(mmap(0, sizeof(SMemoryBlockHeader) + block_size, PROT_READ|PROT_WRITE, mmap_flag, -1, 0));
+    
     //memset(block, 0, sizeof(SMemoryBlockHeader) + block_size);
     if (block == nullptr)
       throw EMemoryErrors::CANNOT_CREATE_BLOCK;
@@ -174,7 +181,11 @@ void MemoryPool::free_unsafe(void* unit_pointer_start)
             block->prev->next = block->next;
             block->next->prev = block->prev;
         }
-        std::free(block);
+
+        if (!use_mmap)
+            std::free(block);
+        else
+            munmap(block, sizeof(SMemoryBlockHeader) + block->blockSize);
     }
 }
 
@@ -213,7 +224,10 @@ void MemoryPool::deallocate(void *unit_pointer_start)
         }
 
         m_lock.unlock();
-        std::free(block);
+        if (!use_mmap)
+            std::free(block);
+        else
+            munmap(block, sizeof(SMemoryBlockHeader) + block->blockSize);
     } else {
         m_lock.unlock();
     }
@@ -277,9 +291,14 @@ void MemoryPool::startScope()
 void MemoryPool::endScope()
 {
     // Free all blocks until the start of scope
-    while (this->currentBlock != this->currentScope->firstScopeBlock) {
+    while (this->currentBlock != this->currentScope->firstScopeBlock) 
+    {
         this->currentBlock = this->currentBlock->prev;
-        std::free(this->currentBlock->next);
+        if (!use_mmap)
+            std::free(this->currentBlock->next);
+        else
+            munmap(this->currentBlock->next, sizeof(SMemoryBlockHeader) + this->currentBlock->next->blockSize);
+        
         this->currentBlock->next = nullptr;
     }
 

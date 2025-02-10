@@ -1,13 +1,19 @@
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <iostream>
-#include <bitset>
+#include <mutex>
 #include <thread>
 #include <vector>
 
 #include "./include/Coroutine.h"
+#include "spin_lock.h"
 #include "test/include/test.h"
 #include "../data_structure/include/BitSetLockFree.h"
-#include "../data_structure/include/ListLockFree.h"
 
+/*
 void list_free_test()
 {
 	ListLockFree<int> list;
@@ -48,37 +54,84 @@ void list_free_test()
 
 	std::cout << list.size() << std::endl;
 }
+ */
 
 void bitset_test()
 {
 	std::cout << "bitset test" << std::endl;
 
-	constexpr auto bits = 1024;
-	BitSetLockFree<bits> bs;
+	constexpr auto bits = 409600;
 
+	BitSetLockFree<bits> bs;
 	std::vector<int> idx;
-	for (int i = 0; i < bits; i++)
+	spin_lock m_lock{};
+	std::vector<std::thread> ts;
+	std::atomic<int> push_idx{};
+	auto push = [&idx, &m_lock, &bs, &push_idx]()
 	{
-		if (rand() & 1)
+		int cur_idx{};
+		while ((cur_idx = push_idx.fetch_add(1)) < bits)
 		{
-			bs.set(i, true);
-			idx.push_back(i);
+			if (rand() & 1)
+				continue;
+
+			assert(cur_idx >= 0 && cur_idx < bits);
+			bs.set(cur_idx, true);
+			std::lock_guard lock(m_lock);
+			idx.push_back(cur_idx);
 		}
-	}
+	};
+	for (int i = 0; i < 6; i++)
+		ts.emplace_back(push);
+	for (int i = 0; i < 6; i++)
+		ts[i].join();
+
+	ts.clear();
+	std::sort(idx.begin(), idx.end());
 
 	for (auto i : idx)
-	{
 		assert(bs.get(i));
-	}
 
 	std::cout << idx.size() << std::endl;
 
-	for (auto i : idx)
+	std::vector<int> res{};
+	std::atomic<int> max_cnt = 0;
+	auto pick = [&res, &m_lock, &bs, &max_cnt]()
 	{
-		std::cout << i << std::endl;
-		auto cur = bs.change_first_expect(true, false);
-		assert(cur == i);
+		while (true) 
+		{
+			auto cur = bs.change_first_expect(true, false);
+			if (cur == BitSetLockFree<>::INVALID_INDEX)
+				break;
+			
+			std::lock_guard lock(m_lock);
+			res.push_back(cur);
+			//std::cout << cur << std::endl;
+			assert(!bs.get(cur));
+			assert(!bs.compare_set(cur, true, false));
+		}
+	};
+
+	for (int i = 0; i < 6; i++)
+		ts.emplace_back(pick);
+	for (int i = 0; i < 6; i++)
+		ts[i].join();
+
+	ts.clear();
+	std::sort(res.begin(), res.end());
+
+	assert(res.size() == idx.size());
+
+	for (size_t i = 0; i < res.size(); i++)
+	{
+		if (res[i] != idx[i])
+		{
+			std::cout << res[i] << ' ' << idx[i] << std::endl;
+			assert(false);
+		}
 	}
+
+	std::cout << "bitset test success" << std::endl;
 }
 
 int main()

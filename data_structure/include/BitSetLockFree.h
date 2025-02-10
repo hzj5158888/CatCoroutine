@@ -1,17 +1,24 @@
 #pragma once
 
+#include <atomic>
+#include <barrier>
+#include <cassert>
 #include <cstddef>
 #include <array>
 #include <cstdint>
-#include <mutex>
+#include <cmath>
+#include <type_traits>
 
-#include "../utils/include/spin_lock.h"
+#include "utils.h"
 
 template<size_t BITS_COUNT = 0>
 class BitSetLockFree
 {
 private:
-	constexpr static size_t block_bytes = sizeof(size_t);
+    using block_t = size_t;
+    using atomic_block = std::atomic<block_t>;
+
+	constexpr static size_t block_bytes = sizeof(block_t);
     constexpr static size_t block_bits = block_bytes * 8;
     constexpr static size_t total_block = (BITS_COUNT + block_bits - 1) / block_bits;
     /* block bits is power of 2 */
@@ -19,134 +26,154 @@ private:
 
     struct data_pos
     {
-        size_t data_idx;
+        size_t block_idx;
         uint16_t data_offset;
     };
 
-    alignas(__CACHE_LINE__) std::array<size_t, total_block> m_block{};
-    alignas(__CACHE_LINE__) std::array<spin_lock, total_block> m_lock{};
+    std::array<atomic_block, total_block> m_block{};
 
-    data_pos get_data_pos(size_t idx) { return {idx / block_bits, static_cast<uint16_t>(idx % block_bits)}; }
-
-    void set_bit(data_pos pos, bool val)
+    template<typename Atomic, typename Fn>
+    block_t atomic_fetch_modify(Atomic & atomic, Fn && fn, std::memory_order order)
     {
-        size_t mask;
-        size_t bit_pos = block_bits - pos.data_offset - 1;
-        if (!val)
+        static_assert(std::is_invocable_r_v<block_t, Fn, block_t>);
+
+        block_t cur = atomic.load(std::memory_order_acquire);
+        block_t const & cref = cur;
+        while (true) 
         {
-            mask = static_cast<size_t>(-1);
-            mask -= static_cast<size_t>(1) << bit_pos;
-            m_block[pos.data_idx] &= mask;
-        } else {
-            mask = static_cast<size_t>(1) << bit_pos;
-            m_block[pos.data_idx] |= mask;
+            cur = atomic.load(std::memory_order_relaxed);
+            if (LIKELY(atomic.compare_exchange_weak(cur, fn(cref), order)))
+                break;
         }
+
+        return cur;
     }
 
-    bool get_bit(data_pos pos)
+    data_pos get_data_pos(size_t idx) 
+    { 
+        size_t block_idx = idx / block_bits;
+        auto byte_offset = static_cast<uint16_t>(idx % block_bits);
+        return {block_idx, byte_offset}; 
+    }
+
+    /* 返回 pos位置 bit数据 是否被修改 */
+    bool set_bit(data_pos pos, bool val, std::memory_order order)
     {
         size_t bit_pos = block_bits - pos.data_offset - 1;
-        return (m_block[pos.data_idx] >> bit_pos) & 1;
+        size_t mask = static_cast<block_t>(1) << bit_pos;
+        if (!val)
+            return m_block[pos.block_idx].fetch_and(~mask, order) & mask;
+
+        return m_block[pos.block_idx].fetch_or(mask, order) & mask;
     }
 
-	/* 执行成功时，调用回调函数callback */
-	template<typename Func>
-	int32_t change_first_expect_impl(bool expected, bool value, Func && then)
+    bool get_bit(data_pos pos, std::memory_order order)
+    {
+        size_t bit_pos = block_bits - pos.data_offset - 1;
+        return (m_block[pos.block_idx].load(order) >> bit_pos) & 1;
+    }
+
+	long long change_first_expect_impl(bool expected, bool value)
 	{
-		const size_t impossible_mask = ~static_cast<size_t>(-expected);
+        long long ans = INVALID_INDEX;
 		for (size_t i = 0; i < total_block; i++)
 		{
-			std::lock_guard lock(m_lock[i]);
-			/* scan each 8 byte */
-			if (m_block[i] == impossible_mask)
+            int bit_idx = block_bits;
+            auto modify_fn = [&bit_idx, expected, value](block_t cur) -> block_t
+            {
+                if (expected)
+                    bit_idx = countl_zero(cur);
+                else
+                    bit_idx = countl_one(cur);
+
+				//std::cout << cur << " " << bit_idx << " " << block_bits << std::endl;
+                if (bit_idx >= static_cast<int>(block_bits))
+                    return cur;
+
+                block_t mask = static_cast<block_t>(1) << (block_bits - bit_idx - 1);
+                if (value)
+                    return cur | mask;
+
+                return cur & ~mask;
+            };
+
+            atomic_fetch_modify(m_block[i], modify_fn, std::memory_order_seq_cst);
+			/* skip this block */
+			if (bit_idx >= static_cast<int>(block_bits))
 				continue;
-
-			int bytes_block_idx{};
-			auto * block_each_byte = reinterpret_cast<uint8_t *>(&m_block[i]);
-			/* scan each byte */
-			for (int j = 0; j < block_bytes; j++)
-			{
-				if (block_each_byte[j] != static_cast<uint8_t>(impossible_mask))
-				{
-					bytes_block_idx = j;
-					break;
-				}
-			}
-
-			/* travel block data */
-			for (uint16_t j = bytes_block_idx * 8; j < block_bits; j++)
-			{
-				bool bit = get_bit({i, j});
-				if (bit == expected)
-				{
-					set_bit({i, j}, value);
-					if constexpr (std::is_invocable_v<Func, int32_t>)
-						then(i * block_bits + j);
-
-					return i * block_bits + j;
-				}
-			}
+            
+            ans = i * block_bits + bit_idx;
+            break;
 		}
 
-		return INVALID_INDEX;
+		return ans;
 	}
 public:
-    constexpr static int32_t INVALID_INDEX = -1;
+    constexpr static long long INVALID_INDEX = -1;
 
     BitSetLockFree() = default;
     ~BitSetLockFree() = default;
 
     constexpr size_t size() { return BITS_COUNT; }
-
+    
+    // 禁止value隐式转换
     template<typename T>
-    void set(size_t idx, T val) = delete; // 禁止val隐式转换
+    void set(size_t idx, T value, std::memory_order order = std::memory_order_seq_cst) = delete;
 
-    void set(size_t idx, bool value)
+    void set(size_t idx, bool value, std::memory_order order = std::memory_order_seq_cst)
     {
         auto pos = get_data_pos(idx);
-        std::lock_guard lock(m_lock[pos.data_idx]);
-        set_bit(pos, value);
+        set_bit(pos, value, order);
     }
 
-    bool get(size_t idx)
+    bool get(size_t idx, std::memory_order order = std::memory_order_seq_cst)
     {
         auto pos = get_data_pos(idx);
-        std::lock_guard lock(m_lock[pos.data_idx]);
-        return get_bit(pos);
+        return get_bit(pos, order);
     }
 
-    bool compare_exchange(size_t idx, bool expected, bool value)
+    bool compare_set(size_t idx, bool expected, bool value, std::memory_order order = std::memory_order_seq_cst)
     {
         auto pos = get_data_pos(idx);
-        std::lock_guard lock(m_lock[pos.data_idx]);
-        if (get_bit(pos) != expected)
-            return false;
 
-        set_bit(pos, value);
-        return true;
+        bool ans = true;
+        auto fn = [pos, expected, value, &ans](block_t cur) -> block_t
+        {
+            size_t bit_pos = block_bits - pos.data_offset - 1;
+            size_t mask = static_cast<block_t>(1) << bit_pos;
+
+			bool cur_bit = (cur & mask) >> bit_pos;
+            if (cur_bit != expected)
+            {
+                ans = false;
+                return cur;
+            }
+
+            if (!value)
+                return cur & ~mask;
+            else
+                return cur | mask;
+        };
+
+        atomic_fetch_modify(m_block[pos.block_idx], fn, order);
+        return ans;
     }
 
 	void flip()
 	{
 		for (size_t i = 0; i < total_block; i++)
 		{
-			std::lock_guard lock(m_lock[i]);
-			m_block[i] = ~m_block[i];
+			atomic_fetch_modify(
+                m_block[i], 
+                [](block_t val) { return ~val; }, 
+                std::memory_order_seq_cst
+            );
 		}
 	}
 
-    int32_t change_first_expect(bool expected, bool value)
+    long long change_first_expect(bool expected, bool value)
     {
-		auto dummy_then_func = 0;
-		return change_first_expect_impl(expected, value, dummy_then_func);
-    }
-
-    /* 执行成功时，调用回调函数callback */
-    template<typename Func>
-    int32_t change_first_expect_then(bool expected, bool value, Func && then)
-    {
-		static_assert(std::is_invocable_v<Func, int32_t>);
-		return change_first_expect_impl(expected, value, then);
+		return change_first_expect_impl(expected, value);
     }
 };
 
@@ -154,5 +181,5 @@ template<>
 class BitSetLockFree<0>
 {
 public:
-    constexpr static int32_t INVALID_INDEX = -1;
+    constexpr static long long INVALID_INDEX = -1;
 };

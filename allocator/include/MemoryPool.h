@@ -72,7 +72,7 @@ struct SMemoryBlockHeader {
          *
          * @param size_t block_size Defines the default stk_size of a block in the pool, by default uses MEMORY_POOL_DEFAULT_BLOCK_SIZE
          */
-        explicit MemoryPool(size_t block_size = MEMORY_POOL_DEFAULT_BLOCK_SIZE, bool single_block = false);
+        explicit MemoryPool(size_t block_size = MEMORY_POOL_DEFAULT_BLOCK_SIZE, bool single_block = false, bool use_mmap = false, int mmap_flag = 0);
         // Destructor
         ~MemoryPool();
 
@@ -87,6 +87,8 @@ struct SMemoryBlockHeader {
         // Data about memory scopes
         SMemoryScopeHeader* currentScope{};
 
+        int mmap_flag{0};
+        bool use_mmap{false};
         bool single_block{};
 		spin_lock m_lock{};
 

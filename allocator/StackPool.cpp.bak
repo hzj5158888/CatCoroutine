@@ -7,7 +7,9 @@
 #include <cstring>
 #include <cassert>
 #include <mutex>
+#include <optional>
 
+#include "../utils/include/spin_lock.h"
 #include "../include/CoPrivate.h"
 #include "BitSetLockFree.h"
 #include "utils.h"
@@ -51,7 +53,7 @@ void StackPool::write_back(StackInfo * info)
 	if (co->ctx.stk_dyn_mem == nullptr)
 	{
 		co->ctx.stk_dyn_saver_alloc = &dyn_stk_saver_pool;
-		co->ctx.stk_dyn_capacity = 3 * co->ctx.stk_size / 2; // 1.5 * stk_size
+		co->ctx.stk_dyn_capacity = 4 * co->ctx.stk_size / 3; // 1.25 * stk_size
 		alloc_dyn_stk_mem(co->ctx.stk_dyn_mem, co->ctx.stk_dyn_capacity);
 	} else if (co->ctx.stk_dyn_capacity <= co->ctx.stk_size)
 	{
@@ -61,7 +63,7 @@ void StackPool::write_back(StackInfo * info)
 		co->ctx.stk_dyn_saver_alloc->deallocate(co->ctx.stk_dyn_mem);
 #endif
 		co->ctx.stk_dyn_saver_alloc = &dyn_stk_saver_pool;
-		co->ctx.stk_dyn_capacity = 3 * co->ctx.stk_size / 2; // 1.5 * stk_size
+		co->ctx.stk_dyn_capacity = 4 * co->ctx.stk_size / 3; // 1.25 * stk_size
 		alloc_dyn_stk_mem(co->ctx.stk_dyn_mem, co->ctx.stk_dyn_capacity);
 	}
 
@@ -78,21 +80,89 @@ void StackPool::unique_assert(int stk_idx)
 
 void StackPool::alloc_static_stk(Co_t * co)
 {
-    auto stk_ptr = stk[0].get_stk_bp_ptr();
-	stk[0].occupy_co = co;
-    co->ctx.occupy_stack = 0;
-    setup_co_static_stk(co, stk_ptr);
-    if (co->ctx.stk_size > 0)
-        std::memcpy(reinterpret_cast<void*>(co->ctx.jmp_reg.sp), co->ctx.stk_dyn_mem, co->ctx.stk_size);
+	std::lock_guard lock(m_lock);
+	DEXPR(int goto_cnt = 0;)
+
+alloc_start:
+	DASSERT(goto_cnt <= 2);
+	bool dont_check = false;
+	uint8_t * stk_ptr{};
+	auto stk_idx{BitSetLockFree<>::INVALID_INDEX};
+	/* coroutine在freed co集合 */
+	if (co->ctx.occupy_stack == BitSetLockFree<>::INVALID_INDEX && (stk_idx = freed_stack.change_first_expect(true, false)) != BitSetLockFree<>::INVALID_INDEX)
+	{
+		DEXPR(unique_assert(stk_idx);) 
+		stk_ptr = stk[stk_idx].get_stk_bp_ptr();
+		if (co->ctx.stk_dyn_size > 0)
+		{
+			auto dyn_size = co->ctx.stk_dyn_size;
+			std::memcpy(stk_ptr - dyn_size, co->ctx.stk_dyn_mem, dyn_size);
+		}
+	} else if ((stk_idx = co->ctx.occupy_stack) != BitSetLockFree<>::INVALID_INDEX && released_co.compare_set(stk_idx, true, false))
+	{
+		stk_ptr = stk[stk_idx].get_stk_bp_ptr();
+		dont_check = true;
+		DEXPR(unique_assert(stk_idx);) 
+	} else {
+		/* 从上一个条件跳转而来 */
+		/* coroutine占有的stack正在被写回 */
+		if (stk_idx != BitSetLockFree<>::INVALID_INDEX)
+		{
+			stk[stk_idx].wait_write_back();
+			DASSERT(co->ctx.occupy_stack == BitSetLockFree<>::INVALID_INDEX);
+			DEXPR(goto_cnt++;)
+			goto alloc_start;
+		}
+
+		while (true)
+		{
+			stk_idx = released_co.change_first_expect(true, false);
+			if (stk_idx == BitSetLockFree<>::INVALID_INDEX)
+				continue;
+			
+			stk[stk_idx].lock_write_back();
+			DEXPR(unique_assert(stk_idx);) 
+			auto info = std::addressof(stk[stk_idx]);
+			write_back(info);
+			info->occupy_co->ctx.occupy_stack = BitSetLockFree<>::INVALID_INDEX;
+			info->occupy_co = nullptr;
+			info->unlock_write_back();
+
+			stk_ptr = stk[stk_idx].get_stk_bp_ptr();
+			if (co->ctx.stk_dyn_size > 0)
+			{
+				auto dyn_size = co->ctx.stk_dyn_size;
+				std::memcpy(stk_ptr - dyn_size, co->ctx.stk_dyn_mem, dyn_size);
+			}
+
+			break;
+		}
+	}
+
+	DASSERT(stk_idx != BitSetLockFree<>::INVALID_INDEX);
+	DEXPR(unique_assert(stk_idx);) 
+	stk[stk_idx].occupy_co = co;
+	stk[stk_idx].stk_status = StackInfo::ACTIVE;
+	co->ctx.occupy_stack = stk_idx;
+	setup_co_static_stk(co, stk_ptr);
+	if (!dont_check)
+		DASSERT(stack_data_verify(&co->ctx));
+
+	DEXPR(running.set(stk_idx, true);)
 }
 
 /* 由coroutine自己主动调用 */
 /* coroutine stack 一定不在 released 队列 */
 void StackPool::destroy_stack(Co_t * co)
 {
+	std::lock_guard lock(m_lock);
+
 	int stk_idx = co->ctx.occupy_stack;
 	stk[stk_idx].stk_status = StackInfo::FREED;
 	stk[stk_idx].occupy_co = nullptr;
+	DEXPR(running.set(stk_idx, false);)
+	released_co.set(stk_idx, false);
+	freed_stack.set(stk_idx, true);
 
 	if (co->ctx.stk_dyn_mem != nullptr)
 #ifdef __MEM_PMR__
@@ -118,12 +188,12 @@ void StackPool::destroy_stack(Co_t * co)
 /* 前提，coroutine stack空闲 */
 void StackPool::release_stack(Co_t * co)
 {
-    write_back(std::addressof(stk[0]));
+	std::lock_guard lock(m_lock);
 
 	int stk_idx = co->ctx.occupy_stack;
 	stk[stk_idx].stk_status = StackInfo::RELEASED;
 	DEXPR(running.set(stk_idx, false);)
-	//released_co.set(stk_idx, true);
+	released_co.set(stk_idx, true);
 }
 
 void StackPool::setup_co_static_stk(Co_t* co, uint8_t * stk_ptr)

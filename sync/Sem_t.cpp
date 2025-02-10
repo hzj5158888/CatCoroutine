@@ -6,6 +6,7 @@
 #include <memory_resource>
 
 #include "../include/CoPrivate.h"
+#include "../include/CoCtx.h"
 #include "include/Sem_t.h"
 #include "../sched/include/CfsSched.h"
 

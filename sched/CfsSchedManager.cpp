@@ -2,16 +2,16 @@
 // Created by hzj on 25-1-14.
 //
 
+#include <cstddef>
 #include <cstdint>
-#include <set>
+#include <vector>
 
 #include "../include/CoPrivate.h"
 #include "include/CfsSched.h"
+#include "utils.h"
 
 void CfsSchedManager::apply(Co_t * co)
 {
-	init_lock.wait_until_lockable();
-
 	// 协程运行中
 	if (co->status == CO_RUNNING) [[unlikely]]
 		throw ApplyRunningCoException();
@@ -19,16 +19,19 @@ void CfsSchedManager::apply(Co_t * co)
 	if (co->status == CO_READY && co->scheduler != nullptr) [[unlikely]]
 		assert(false);
 
+	/* back to origin coroutine */
+	if (co->sched.occupy_thread != -1)
+	{
+		schedulers[co->sched.occupy_thread]->apply_ready(co);
+		return;
+	}
+
 	int min_scheduler_idx = 0;
 	uint64_t min_balance = INF;
 	for (size_t i = 0; i < schedulers.size(); i++)
 	{
-		auto & scheduler = schedulers[i];
-		uint64_t balance = scheduler->sum_v_runtime.load(std::memory_order_relaxed);
-		balance += scheduler->ready_count.load(std::memory_order_acquire);
-
+		auto balance = schedulers[i]->get_load();
 		//std::cout << "<" << balance << ", " << i << ">" << std::endl;
-
 		if (balance < min_balance)
 		{
 			min_balance = balance;
@@ -36,7 +39,8 @@ void CfsSchedManager::apply(Co_t * co)
 		}
 	}
 
-	co->scheduler = schedulers[min_scheduler_idx];
+	co->sched.occupy_thread = min_scheduler_idx;
+	co->scheduler = schedulers[min_scheduler_idx].get();
 	schedulers[min_scheduler_idx]->apply_ready(co);
 }
 
@@ -55,6 +59,25 @@ void CfsSchedManager::wakeup_await_co_all(Co_t * await_callee)
 		cur->await_callee = nullptr;
 		apply(cur);
 	}
+}
+
+std::vector<Co_t*> CfsSchedManager::stealing_work(int thread_from)
+{
+	DASSERT(thread_from >= 0 && (size_t)thread_from < schedulers.size());
+#ifdef __STACK_STATIC__
+	return std::vector<Co_t*>{};
+#endif
+
+	std::vector<Co_t *> res{};
+	for (size_t i = 0; i < schedulers.size(); i++)
+	{
+		if ((int)i == thread_from)
+			continue;
+
+		schedulers[i]->pull_half_co(res);
+	}
+
+	return res;
 }
 
 void CfsSchedManager::push_scheduler(const std::shared_ptr<CfsScheduler> & s)

@@ -1,3 +1,4 @@
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <thread>
@@ -7,11 +8,13 @@
 #include "context/include/Context.h"
 #include "include/Coroutine.h"
 #include "include/CoPrivate.h"
+#include "include/CoCtx.h"
 #include "sched/include/CfsSched.h"
 #include "include/AllocatorGroup.h"
 #include "allocator/include/MemoryPool.h"
 
 #include "utils/include/utils.h"
+#include "utils/include/tscns.h"
 
 namespace co_ctx {
 	bool is_init{false};
@@ -52,13 +55,26 @@ namespace co {
 		};
 	}
 
-	void init_other(int thread_idx) noexcept
+	void init_other(int thread_idx)
 	{
 		/* init other thread */
 		co_ctx::loc = std::make_shared<local_t>();
 		co_ctx::loc->thread_id = std::this_thread::get_id();
 		co_ctx::loc->scheduler = std::make_shared<CfsScheduler>();
-		co_ctx::loc->scheduler->manager = co_ctx::manager;
+		co_ctx::loc->scheduler->this_thread_id = thread_idx;
+
+		/* init local system clock calibrate thread */
+		auto clock_calibrate_fn = [](TSCNS * clock)
+		{
+			while (true)
+			{
+				clock->calibrate();
+				std::this_thread::sleep_for(std::chrono::seconds(1));
+			}
+		};
+		co_ctx::loc->clock.init();
+		std::thread{clock_calibrate_fn, std::addressof(co_ctx::loc->clock)}.detach();
+
 		co_ctx::manager->push_scheduler(co_ctx::loc->scheduler);
 		/* create scheduler loop context */
 		auto ctx = &co_ctx::loc->scheduler->sched_ctx;
@@ -66,7 +82,10 @@ namespace co {
 		make_context(ctx, start_ptr, co_ctx::loc->scheduler.get());
 		co_ctx::loc->alloc.dyn_stk_pool.alloc_stk(ctx);
 		if (thread_idx > 0)
+		{
+			co_ctx::manager->init_lock.wait_until_lockable();
 			co_ctx::loc->scheduler->jump_to_sched();
+		}
 	}
 
 	void init()
@@ -83,7 +102,10 @@ namespace co {
 		for (int i = 0; i < CPU_CORE - 1; i++)
 			std::thread{init_other, i + 1}.detach();
 
-		/* init finish */
+		/* wait for init finish */
+		co_ctx::manager->init_lock.wait_until_lockable();
+
+		/* init finished */
 		co_ctx::is_init = true;
 
 		/* create main coroutine */

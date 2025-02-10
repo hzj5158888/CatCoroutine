@@ -5,20 +5,16 @@
 #pragma once
 
 #include <cstdint>
+
+#ifdef __MEM_PMR__
 #include <memory_resource>
-#include <mutex>
-#include <queue>
-#include <memory>
-#include <unordered_set>
-#include <unordered_map>
-#include <vector>
+#endif
 
 #include "MemoryPool.h"
 #include "StackPoolDef.h"
 #include "../../include/Coroutine.h"
 #include "../../utils/include/spin_lock.h"
 #include "../../include/CoDef.h"
-#include "../data_structure/include/ListLockFree.h"
 #include "../data_structure/include/BitSetLockFree.h"
 #include "utils.h"
 
@@ -56,7 +52,7 @@ struct StackInfo
 
 struct StackPool
 {
-	std::array<StackInfo, co::STATIC_STK_NUM> stk{};
+	std::array<StackInfo, 1> stk{};
 
 #ifdef __MEM_PMR__
 	std::pmr::synchronized_pool_resource dyn_stk_saver_pool{get_default_pmr_opt()};
@@ -67,12 +63,14 @@ struct StackPool
 	spin_lock m_lock{};
 	BitSetLockFree<co::STATIC_STK_NUM> freed_stack{};
 	BitSetLockFree<co::STATIC_STK_NUM> released_co{};
+	BitSetLockFree<co::STATIC_STK_NUM> running{};
 
 	StackPool();
 	void alloc_dyn_stk_mem(void * &mem_ptr, std::size_t size);
 	void write_back(StackInfo * info);
-	void setup_co_static_stk(Co_t* co, uint8_t * stk);
+	void setup_co_static_stk(Co_t* co, uint8_t * stk_ptr);
 	void destroy_stack(Co_t * co);
 	void release_stack(Co_t * co);
 	void alloc_static_stk(Co_t * co);
+	void unique_assert(int);
 };

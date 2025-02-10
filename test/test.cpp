@@ -57,20 +57,18 @@ void basic_test()
 	end_of_test();
 }
 
-void dyn_alloc_test()
+void switch_test()
 {
 	std::ios::sync_with_stdio(false);
 	auto work_loop = [] (std::atomic<int> & g_count)
 	{
-		constexpr auto print_round = 100;
+		constexpr auto print_round = 1000;
 		for (int i = 0; i < print_round; i++)
 		{
-			/*
-			std::cout << g_count;
-			std::cout << "\n" << std::flush;
-			*/
+			//std::cout << g_count;
+			//std::cout << "\n" << std::flush;
 
-			g_count++;
+			g_count.fetch_add(1, std::memory_order_seq_cst);
 			co::yield();
 		}
 	};
@@ -80,15 +78,14 @@ void dyn_alloc_test()
 		co::Co<co::PRIORITY_NORMAL> x, y;
 	};
 
-	constexpr auto coroutine_cnt = 4000;
+	constexpr auto coroutine_cnt = 1000000;
 
-	std::cout << "dyn_alloc_test" << std::endl;
-
-	start_cal();
+	std::cout << "coroutine switch test" << std::endl;
 
 	std::atomic<int> g_count{};
 	std::vector<coro> vec{};
 	vec.reserve(coroutine_cnt / 2);
+	start_cal();
 	for (int i = 0; i < coroutine_cnt / 2; i++)
 	{
 		//auto c1 = co::Co{work_loop, "<X, " + std::to_string(i) + ">: ", std::ref(g_count)};
@@ -105,8 +102,7 @@ void dyn_alloc_test()
 	}
 
 	std::ios::sync_with_stdio(true);
-	std::cout << "dyn alloc test end" << std::endl;
-	std::cout << "g_count = " << g_count << std::endl;
+	std::cout << "switch_count = " << g_count << std::endl;
 	end_cal();
 	end_of_test();
 }
@@ -115,5 +111,5 @@ void test()
 {
 	std::cout << "test 1" << std::endl;
 	//basic_test();
-	dyn_alloc_test();
+	switch_test();
 }

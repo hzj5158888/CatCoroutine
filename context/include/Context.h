@@ -59,7 +59,7 @@ struct Context
         uint64_t sp;
         uint64_t ip; 	// rip, program counter
 		uint32_t mxcsr; // sse2 control and status word, offset=64
-		uint16_t x87cw; // x87 fpu control word, offset=68
+		uint32_t x87cw; // x87 fpu control word, offset=68
 #else
         void * bx;
         void * si, * di; // index register
@@ -68,7 +68,7 @@ struct Context
 #endif
     } jmp_reg{};
 
-/* pass arguments by switch_context_first_run */
+/* pass 2 arguments by switch_context_first_run */
 #if defined __x86_64__
     struct {
         uint64_t di, si; // 2 arg is enough
@@ -90,7 +90,7 @@ struct Context
 		if (stk_real_bottom == nullptr) // first set
 		{
 			jmp_reg.bp = reinterpret_cast<uint64_t>(stk);
-			jmp_reg.sp = jmp_reg.bp - stk_size;
+			jmp_reg.sp = jmp_reg.bp;
 		} else {
 			jmp_reg.bp = jmp_reg.bp - (std::size_t)stk_real_bottom + (std::size_t)stk;
 			jmp_reg.sp = jmp_reg.bp - frame_size;
@@ -106,7 +106,7 @@ struct Context
 		if (stk_dyn_real_bottom == nullptr) // first set
 		{
 			jmp_reg.bp = reinterpret_cast<uint64_t>(stk);
-			jmp_reg.sp = jmp_reg.bp - stk_dyn_size;
+			jmp_reg.sp = jmp_reg.bp;
 		} else {
 			jmp_reg.bp = jmp_reg.bp - (std::size_t)stk_dyn_real_bottom + (std::size_t)stk;
 			jmp_reg.sp = jmp_reg.bp - frame_size;
@@ -119,8 +119,12 @@ struct Context
 
 	void assert_stack() 
 	{
-		assert(jmp_reg.bp > 0 && jmp_reg.sp > 0 && jmp_reg.ip > 0); 
-		assert(jmp_reg.bp - jmp_reg.sp <= co::MAX_STACK_SIZE);
+		DASSERT(jmp_reg.bp > 0 && jmp_reg.sp > 0 && jmp_reg.ip > 0);
+		if (stk_is_static)
+		{
+			DASSERT((size_t)stk_real_bottom - jmp_reg.sp <= co::MAX_STACK_SIZE);
+			DASSERT((size_t)stk_real_bottom >= jmp_reg.bp);
+		}
 	}
 
     void * get_jmp_buf() { return std::launder(&jmp_reg); }

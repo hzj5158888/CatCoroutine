@@ -1,3 +1,4 @@
+.align 16
 .global switch_context_first_full_save
 .type switch_context_first_full_save, @function
 switch_context_first_full_save:

@@ -1,36 +1,101 @@
+#include <atomic>
 #include <cassert>
+#include <cstdint>
+#include <ctime>
 #include <execinfo.h>
+#include <mutex>
+#include <vector>
 
 #include "CfsSched.h"
 #include "../../context/include/Context.h"
 #include "../../include/CoPrivate.h"
+#include "../../include/CoCtx.h"
 #include "Coroutine.h"
+#include "spin_lock.h"
 #include "utils.h"
+#include "atomic_utils.h"
+
+void CfsScheduler::push_to_ready(Co_t * co, bool enable_lock)
+{
+	std::unique_lock<spin_lock> lock;
+#ifdef __SCHED_SKIP_LIST__
+	ready.push(co);
+#elif __SCHED_RB_TREE__
+	if (enable_lock)
+		lock = std::unique_lock(sched_lock);
+
+	ready.insert(co);
+#elif __SCHED_HEAP__
+	if (enable_lock)
+		lock = std::unique_lock(sched_lock);
+
+	if (co->sched.can_migration)
+		ready.push(co);
+	else
+		ready_fixed.push(co);
+#endif
+}
+
+void CfsScheduler::pull_half_co(std::vector<Co_t*> & ans)
+{
+	if (ready.empty())
+		return;
+
+	std::lock_guard lock(sched_lock);
+	int pull_count = ready.size() / 2;
+	for (int i = 0; i < pull_count; i++)
+	{
+		ans.push_back(ready.top());
+		ready.pop();
+
+		remove_from_scheduler(ans.back());
+		ans.back()->sched.occupy_thread = -1;
+		sem_ready.wait();
+	}
+}
 
 void CfsScheduler::apply_ready(Co_t * co)
 {
 	if (co->sched.v_runtime == 0)
-		co->sched.v_runtime = min_v_runtime;
+		co->sched.v_runtime = min_v_runtime.load(std::memory_order_acquire);
 	sum_v_runtime += co->sched.v_runtime;
 
 	co->status_lock.lock();
 	co->status = CO_READY;
 	co->status_lock.unlock();
 
-#ifdef __SCHED_SKIP_LIST__
-	ready.push(co);
-#elif __SCHED_RB_TREE__
-	sched_lock.lock();
-	ready.insert(co);
-	sched_lock.unlock();
-#elif __SCHED_HEAP__
-	sched_lock.lock();
-	ready.push(co);
-	sched_lock.unlock();
-#endif
-
+	push_to_ready(co, true);
 	ready_count.fetch_add(1, std::memory_order_acq_rel);
 	sem_ready.signal();
+}
+
+void CfsScheduler::apply_ready_all(const std::vector<Co_t *> & co_vec)
+{
+	if (co_vec.empty())
+		return;
+
+	uint64_t cur_sum_v_runtime = 0;
+	for (auto co : co_vec)
+	{
+		if (co->sched.v_runtime == 0)
+			co->sched.v_runtime = min_v_runtime.load(std::memory_order_acquire);
+
+		co->status_lock.lock();
+		co->status = CO_READY;
+		co->status_lock.unlock();
+
+		cur_sum_v_runtime += co->sched.v_runtime;
+		co->sched.occupy_thread = this_thread_id;
+	}
+	sum_v_runtime.fetch_add(cur_sum_v_runtime, std::memory_order_acq_rel);
+
+	sched_lock.lock();
+	for (auto co : co_vec)
+		push_to_ready(co, false);
+	sched_lock.unlock();
+
+	ready_count.fetch_add(co_vec.size(), std::memory_order_acq_rel);
+	sem_ready.signal(co_vec.size());
 }
 
 void CfsScheduler::remove_ready(Co_t * co)
@@ -61,23 +126,23 @@ void CfsScheduler::remove_ready(Co_t * co)
 	assert(false);
 #endif
 
-	sum_v_runtime.fetch_sub(co->sched.v_runtime, std::memory_order_release);
+	sum_v_runtime.fetch_sub(co->sched.v_runtime, std::memory_order_acq_rel);
 }
 
 void CfsScheduler::remove_from_scheduler(Co_t * co)
 {
-	if (co->status == CO_READY)
-		remove_ready(co);
-	else {
-		sum_v_runtime -= co->sched.v_runtime;
-	}
-
+	sum_v_runtime -= co->sched.v_runtime;
 	co->scheduler = nullptr;
 }
 
 Co_t * CfsScheduler::pickup_ready()
 {
-	sem_ready.wait();
+	if (!sem_ready.try_wait())
+	{
+		auto res = co_ctx::manager->stealing_work(this_thread_id);
+		apply_ready_all(res);
+		sem_ready.wait();
+	}
 	ready_count.fetch_sub(1, std::memory_order_acq_rel);
 
 #ifdef __SCHED_SKIP_LIST__
@@ -99,11 +164,35 @@ Co_t * CfsScheduler::pickup_ready()
 #elif __SCHED_HEAP__
 	sched_lock.lock();
 	
-	auto ans = ready.top();
-	ready.pop();
-	if (!ready.empty()) [[likely]]
-		min_v_runtime = ready.top()->sched.v_runtime;
+	Co_t * ans{};
+	Co_t * ans_list[2]{nullptr, nullptr};
+	if (!ready.empty())
+		ans_list[0] = ready.top();
+	if (!ready_fixed.empty())
+		ans_list[1] = ready_fixed.top();
 
+	DASSERT(ans_list[0] || ans_list[1]);
+
+	if (CoPtrLessCmp{}(ans_list[0], ans_list[1]))
+	{
+		ans = ans_list[0];
+		ready.pop();
+	} else {
+		ans = ans_list[1];
+		ready_fixed.pop();
+	}
+
+	auto up_v_runtime_fn = [this](uint64_t cur_v_time) -> uint64_t
+	{
+		if (!ready.empty()) [[likely]]
+			cur_v_time = std::min(cur_v_time, ready.top()->sched.v_runtime);
+		if (!ready_fixed.empty()) [[likely]]
+			cur_v_time = std::min(cur_v_time, ready_fixed.top()->sched.v_runtime);
+
+		return cur_v_time;
+	};
+	atomic_fetch_modify(min_v_runtime, up_v_runtime_fn, std::memory_order_acq_rel);
+	
 	sched_lock.unlock();
 #endif
 
@@ -148,10 +237,10 @@ Co_t * CfsScheduler::interrupt(int new_status, bool unlock_exit)
 	/* update the status */
 	running_co->status = new_status;
 	/* update running time */
-	sum_v_runtime -= running_co->sched.v_runtime;
+	sum_v_runtime.fetch_sub(running_co->sched.v_runtime, std::memory_order_acq_rel);
 	running_co->sched.end_exec();
 	running_co->sched.up_v_runtime();
-	sum_v_runtime += running_co->sched.v_runtime;
+	sum_v_runtime.fetch_add(running_co->sched.v_runtime, std::memory_order_acq_rel);
 	/* release stack */
 	running_co->stk_active_lock.unlock();
 
@@ -164,6 +253,13 @@ Co_t * CfsScheduler::interrupt(int new_status, bool unlock_exit)
 	running_co = nullptr;
 
 	return ans;
+}
+
+uint64_t CfsScheduler::get_load()
+{
+	uint64_t load = sum_v_runtime.load(std::memory_order_relaxed);
+	load += ready_count.load(std::memory_order_acquire) * 1000 * 1000;
+	return load;
 }
 
 void CfsScheduler::coroutine_yield()
@@ -182,7 +278,7 @@ void CfsScheduler::coroutine_yield()
 #endif
 
 	/* apply to scheduler */
-	manager->apply(yield_co);
+	co_ctx::manager->apply(yield_co);
 }
 
 void CfsScheduler::coroutine_await()

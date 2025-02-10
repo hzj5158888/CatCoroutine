@@ -4,9 +4,7 @@
 
 #pragma once
 
-#include <atomic>
 #include <cerrno>
-#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -20,6 +18,19 @@ public:
   }
 };
 
+class CountingSemModifyException : public std::exception 
+{
+public:
+    int err_code{};
+
+    CountingSemModifyException(int code) : err_code(code) {}
+
+    [[nodiscard]] const char * what() const noexcept override 
+    {
+        return "counting_sem Modify failed";
+    }
+};
+
 class counting_semaphore {
 private:
   sem_t sem{};
@@ -28,6 +39,8 @@ public:
   ~counting_semaphore();
   inline void wait();
   inline void signal();
+  inline void signal(uint32_t count);
+  inline bool try_wait();
 };
 
 counting_semaphore::counting_semaphore(uint32_t count) {
@@ -38,6 +51,24 @@ counting_semaphore::counting_semaphore(uint32_t count) {
 
 inline counting_semaphore::~counting_semaphore() { sem_destroy(&sem); }
 
-inline void counting_semaphore::wait() { sem_wait(&sem); }
+inline void counting_semaphore::wait() 
+{ 
+    int res = sem_wait(&sem);
+    if (res != 0)
+      throw CountingSemModifyException(res);
+}
 
-inline void counting_semaphore::signal() { sem_post(&sem); }
+inline void counting_semaphore::signal() 
+{ 
+    int res = sem_post(&sem);
+    if (res != 0)
+      throw CountingSemModifyException(res);
+}
+
+inline void counting_semaphore::signal(uint32_t count) 
+{ 
+    for (; count != 0; count--)
+      signal();
+}
+
+inline bool counting_semaphore::try_wait() { return sem_trywait(&sem) == 0; }
