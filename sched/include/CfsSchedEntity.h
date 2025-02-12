@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../../include/CoCtx.h"
 #include "SchedEntity.h"
 
 /* include/linux/sched.h */
@@ -21,8 +22,31 @@ public:
 
 	uint16_t nice{};
 	uint64_t v_runtime{};
+    uint64_t real_runtime{};
+    uint64_t start_exec_timestamp{};
+    uint64_t end_exec_timestamp{};
 
 	[[nodiscard]] uint64_t priority() const { return v_runtime; }
+
+    void up_real_runtime()
+    {
+        real_runtime += end_exec_timestamp - start_exec_timestamp;
+        end_exec_timestamp = start_exec_timestamp = 0;
+    }
+
+    void start_exec() override
+    {
+        //auto now = std::chrono::system_clock::now();
+        //start_exec_timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+        start_exec_timestamp = co_ctx::loc->clock.rdns();
+    }
+
+    void end_exec() override
+    {
+        //auto now = std::chrono::system_clock::now();
+        //end_exec_timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
+        end_exec_timestamp = co_ctx::loc->clock.rdns();
+    }
 
 	void prefetch_v_runtime() const { __builtin_prefetch(&v_runtime, 0, 3); }
 

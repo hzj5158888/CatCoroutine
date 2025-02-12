@@ -1,7 +1,7 @@
 #include <cstdint>
 
 #include "../include/CoCtx.h"
-#include "../sched/include/CfsSched.h"
+#include "../sched/include/Scheduler.h"
 #include "include/Semaphore.h"
 #include "include/Sem_t.h"
 #include "../context/include/Context.h"

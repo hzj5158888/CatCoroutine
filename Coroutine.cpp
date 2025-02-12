@@ -9,7 +9,7 @@
 #include "include/Coroutine.h"
 #include "include/CoPrivate.h"
 #include "include/CoCtx.h"
-#include "sched/include/CfsSched.h"
+#include "sched/include/Scheduler.h"
 #include "include/AllocatorGroup.h"
 #include "allocator/include/MemoryPool.h"
 
@@ -18,7 +18,7 @@
 
 namespace co_ctx {
 	bool is_init{false};
-	std::shared_ptr<CfsSchedManager> manager{};
+	std::shared_ptr<SchedManager> manager{};
 	std::atomic<uint32_t> coroutine_count{co::MAIN_CO_ID};
 	thread_local std::shared_ptr<local_t> loc{};
 }
@@ -60,9 +60,9 @@ namespace co {
 		/* init other thread */
 		co_ctx::loc = std::make_shared<local_t>();
 		co_ctx::loc->thread_id = std::this_thread::get_id();
-		co_ctx::loc->scheduler = std::make_shared<CfsScheduler>();
+		co_ctx::loc->scheduler = std::make_shared<Scheduler>();
 		co_ctx::loc->scheduler->this_thread_id = thread_idx;
-
+#ifdef __SCHED_CFS__
 		/* init local system clock calibrate thread */
 		auto clock_calibrate_fn = [](TSCNS * clock)
 		{
@@ -74,11 +74,11 @@ namespace co {
 		};
 		co_ctx::loc->clock.init();
 		std::thread{clock_calibrate_fn, std::addressof(co_ctx::loc->clock)}.detach();
-
-		co_ctx::manager->push_scheduler(co_ctx::loc->scheduler);
+#endif
+		co_ctx::manager->push_scheduler(co_ctx::loc->scheduler, thread_idx);
 		/* create scheduler loop context */
 		auto ctx = &co_ctx::loc->scheduler->sched_ctx;
-		auto start_ptr = get_member_func_addr<void(*)(void*)>(&CfsScheduler::start);
+		auto start_ptr = get_member_func_addr<void(*)(void*)>(&Scheduler::start);
 		make_context(ctx, start_ptr, co_ctx::loc->scheduler.get());
 		co_ctx::loc->alloc.dyn_stk_pool.alloc_stk(ctx);
 		if (thread_idx > 0)
@@ -92,8 +92,7 @@ namespace co {
 	{
 		/* currency is main thread */
 		/* init scheduler manager */
-		co_ctx::manager = std::make_shared<CfsSchedManager>();
-		co_ctx::manager->schedulers.reserve(CPU_CORE);
+		co_ctx::manager = std::make_shared<SchedManager>(CPU_CORE);
 		co_ctx::manager->init_lock.lock();
 		/* init thread local storage */
 		init_other(0);
@@ -112,7 +111,9 @@ namespace co {
 		Co_t * co = new Co_t{};
 		/* co->id == 1 */
 		co->id = co_ctx::coroutine_count++;
+#ifdef __SCHED_CFS__
 		co->sched.nice = PRIORITY_NORMAL;
+#endif
 		/* doesn't need to alloc stack */
 		/* just save context */
 		int res = save_context(co->ctx.get_jmp_buf(), &co->ctx.first_full_save);
@@ -162,7 +163,9 @@ namespace co {
 		co = new (co) Co_t{}; // construct
 		co->id = co_ctx::coroutine_count++;
 		co->allocator = &co_ctx::loc->alloc.co_pool;
+#ifdef __SCHED_CFS__
 		co->sched.nice = nice;
+#endif
 		make_context_wrap(&co->ctx, &wrap, func, arg);
 		// 由 scheduler 负责分配 stack
 		co_ctx::manager->apply(co);
@@ -188,7 +191,6 @@ namespace co {
 			callee->status_lock.unlock();
 			return;
 		}
-		callee->status_lock.unlock();
 
 		/* 打断当前 Coroutine */
 		auto running_co = co_ctx::loc->scheduler->running_co;

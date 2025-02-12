@@ -8,7 +8,7 @@
 #include "../include/CoPrivate.h"
 #include "../include/CoCtx.h"
 #include "include/Sem_t.h"
-#include "../sched/include/CfsSched.h"
+#include "../sched/include/Scheduler.h"
 
 void Sem_t::wait()
 {

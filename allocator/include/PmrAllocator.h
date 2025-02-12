@@ -11,8 +11,6 @@ class PmrAllocatorLockFree
 private:
     std::pmr::synchronized_pool_resource pool{get_default_pmr_opt()};
 public:
-    PmrAllocatorLockFree() = default;
-
     T * allocate(size_t size)
     {
         return reinterpret_cast<T*>(pool.allocate(size));

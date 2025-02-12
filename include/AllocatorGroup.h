@@ -8,10 +8,8 @@
 #include "../allocator/include/MemoryPool.h"
 #include "../allocator/include/DynStackPool.h"
 
-#ifdef __MEM_PMR__
 #include "utils.h"
 #include <memory_resource>
-#endif
 
 struct AllocatorGroup
 {

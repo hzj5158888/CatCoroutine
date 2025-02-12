@@ -62,11 +62,11 @@ void switch_test()
 	std::ios::sync_with_stdio(false);
 	auto work_loop = [] (std::atomic<int> & g_count)
 	{
-		constexpr auto print_round = 1000;
+		constexpr auto print_round = 2000;
 		for (int i = 0; i < print_round; i++)
 		{
 			//std::cout << g_count;
-			//std::cout << "\n" << std::flush;
+			//std::cout << "\n";
 
 			g_count.fetch_add(1, std::memory_order_seq_cst);
 			co::yield();
@@ -78,7 +78,7 @@ void switch_test()
 		co::Co<co::PRIORITY_NORMAL> x, y;
 	};
 
-	constexpr auto coroutine_cnt = 1000000;
+	constexpr auto coroutine_cnt = 500000;
 
 	std::cout << "coroutine switch test" << std::endl;
 

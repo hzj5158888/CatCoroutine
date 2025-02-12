@@ -6,7 +6,6 @@
 #include <memory>
 #include <cstring>
 #include <cassert>
-#include <mutex>
 
 #include "../include/CoPrivate.h"
 #include "BitSetLockFree.h"
@@ -83,7 +82,7 @@ void StackPool::alloc_static_stk(Co_t * co)
     co->ctx.occupy_stack = 0;
     setup_co_static_stk(co, stk_ptr);
     if (co->ctx.stk_size > 0)
-        std::memcpy(reinterpret_cast<void*>(co->ctx.jmp_reg.sp), co->ctx.stk_dyn_mem, co->ctx.stk_size);
+		std::memcpy(reinterpret_cast<void*>(co->ctx.jmp_reg.sp), co->ctx.stk_dyn_mem, co->ctx.stk_size);
 }
 
 /* 由coroutine自己主动调用 */

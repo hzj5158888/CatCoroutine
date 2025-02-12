@@ -22,9 +22,9 @@ aux_source_directory(${ALLOCATOR_PATH} allocator)
 set(CONTEXT_PATH ${SRC}/context)
 include_directories(${CONTEXT_PATH}/include)
 aux_source_directory(${CONTEXT_PATH} context)
-set(context ${context} ${CONTEXT_PATH}/switch_context_first_run.asm)
-set(context ${context} ${CONTEXT_PATH}/_switch_context.asm)
-set(context ${context} ${CONTEXT_PATH}/save_context.asm)
+set(context ${context} ${CONTEXT_PATH}/switch_context_first_run.S)
+set(context ${context} ${CONTEXT_PATH}/_switch_context.S)
+set(context ${context} ${CONTEXT_PATH}/save_context.S)
 
 # utils
 set(UTILS_PATH ${SRC}/utils)
@@ -51,14 +51,14 @@ find_package(Boost REQUIRED)
 include_directories(${Boost_INCLUDE_DIRS})
 
 # exec
-enable_language(ASM-ATT)
+enable_language(ASM)
 set(CMAKE_CXX_COMPILER /usr/bin/g++-13)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -Wall -Werror -fno-omit-frame-pointer")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -Wall -fPIE -Werror -fno-omit-frame-pointer")
 add_executable(Coroutine ${main} ${data_structure} ${allocator} ${context} ${utils} ${sched} ${sync} ${test})
 
 # basic configuration
-add_compile_definitions(__CPU_CORE__=6)
+add_compile_definitions(__CPU_CORE__=8)
 add_compile_definitions(__CACHE_LINE__=64)
 
 # debug flag
@@ -71,15 +71,15 @@ add_compile_definitions(__CACHE_LINE__=64)
 #add_compile_definitions(__RECYCLER_LF__)
 
 # scheduler data structure
+add_compile_definitions(__SCHED_CFS__)
 #add_compile_definitions(__SCHED_RB_TREE__)
 add_compile_definitions(__SCHED_HEAP__)
-#add_compile_definitions(__SCHED_SKIP_LIST__)
 #add_compile_definitions(__SCHED_FIFO__)
 
 # stack allocate mode
-#add_compile_definitions(__STACK_DYN__)
+add_compile_definitions(__STACK_DYN__)
 #add_compile_definitions(__STACK_DYN_MMAP__)
-add_compile_definitions(__STACK_STATIC__)
+#add_compile_definitions(__STACK_STATIC__)
 
 # pthread
 target_link_libraries(Coroutine pthread ${Boost_LIBRARIES})

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <memory>
 #include <utility>
 #include <vector>
 
@@ -28,13 +29,14 @@ private:
 
     void pushdown(int u)
     {
+        int cur_size = (int)m_data.size();
         while (true)
         {
             int son = -1;
             for (int i = 0; i < 4; i++)
             {
                 int cur_son = get_son(u, i);
-                if ((size_t)cur_son >= m_data.size()) [[unlikely]]
+                if (cur_son >= cur_size) [[unlikely]]
                     return;
 
                 if (!m_cmp(m_data[u], m_data[cur_son]))

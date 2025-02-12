@@ -12,6 +12,7 @@
 #include "spin_lock.h"
 #include "test/include/test.h"
 #include "../data_structure/include/BitSetLockFree.h"
+#include "../data_structure/include/QueueLockFree.h"
 
 /*
 void list_free_test()
@@ -55,6 +56,61 @@ void list_free_test()
 	std::cout << list.size() << std::endl;
 }
  */
+
+void queue_lock_free_test()
+{
+    QueueLockFree<int> q;
+    constexpr int data_count = 10000000;
+    auto push_elem = [&q]()
+    {
+        for (int i = 0; i < data_count; i++)
+            q.push(i);
+    };
+
+    spin_lock m_lock{};
+    std::vector<int> res{};
+    auto pull_elem = [&q, &res, &m_lock]()
+    {
+        for (int i = 0; i < data_count; i++)
+        {
+            std::lock_guard lock(m_lock);
+            auto top = q.try_pop();
+            assert(top.has_value());
+            res.push_back(top.value());
+        }
+    };
+
+    assert(q.empty());
+    res.clear();
+
+    int cpu_count = 8;
+    std::vector<std::thread> thread_vec{};
+    for (int i = 0; i < cpu_count; i++)
+    {
+        thread_vec.emplace_back(push_elem);
+        thread_vec.emplace_back(pull_elem);
+    }
+    for (auto & v : thread_vec)
+        v.join();
+
+    std::sort(res.begin(), res.end());
+
+    int idx = 0;
+    while (idx < (int)res.size())
+    {
+        for (int i = 0; i < cpu_count; i++)
+        {
+            std::cout << res[i + idx] << " ";
+            assert(res[i + idx] == res[idx]);
+        }
+
+        idx += cpu_count;
+    }
+
+    std::cout << std::endl;
+    std::cout << "res_size: " << res.size() << std::endl;
+    std::cout << std::endl;
+}
 
 void bitset_test()
 {
@@ -139,6 +195,7 @@ int main()
 	std::cout << "main entry" << std::endl;
 
 	//list_free_test();
+    //queue_lock_free_test();
 	//bitset_test();
 
 	co::init();

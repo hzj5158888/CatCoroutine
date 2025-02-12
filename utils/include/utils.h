@@ -102,7 +102,7 @@ constexpr int countl_one(T x)
 	return countl_zero(~x);
 }
 
-inline std::pmr::pool_options get_default_pmr_opt()
+inline constexpr std::pmr::pool_options get_default_pmr_opt()
 {
     return std::pmr::pool_options {
         48,

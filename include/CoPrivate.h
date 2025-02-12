@@ -10,8 +10,10 @@
 #include "../context/include/Context.h"
 #include "../include/Coroutine.h"
 #include "../allocator/include/MemoryPool.h"
-#include "../../sched/include/CfsSchedDef.h"
+#include "../../sched/include/SchedulerDef.h"
 #include "../../sched/include/CfsSchedEntity.h"
+#include "../../data_structure/include/QueueLockFree.h"
+#include "../../allocator/include/PmrAllocator.h"
 
 enum CO_STATUS
 {
@@ -43,29 +45,28 @@ struct Co_t
 	// 栈是否活跃
 	spin_lock stk_active_lock{};
 
-    // 存储
-	// CFS Scheduler
-	/*
-	using CoReadyIter = std::multiset<Co_t*>::iterator;
-	CoReadyIter ready_self{};
-	*/
-
 	// await
-	spin_lock await_lock{};
 	Co_t * await_callee{}; // await 谁
-	std::queue<Co_t *> await_caller{}; // 谁 await
+    spin_lock await_caller_lock{};
+    std::queue<Co_t*> await_caller{}; // 谁 await
 
     // 调度信息
-	alignas(__CACHE_LINE__) CfsSchedEntity sched{}; 
-	CfsScheduler * scheduler{};
+#ifdef __SCHED_CFS__
+	alignas(__CACHE_LINE__) CfsSchedEntity sched{};
+#elif __SCHED_FIFO__
+    alignas(__CACHE_LINE__) SchedEntity sched{};
+#endif
+	Scheduler * scheduler{};
 
 	Co_t() = default;
 	Co_t(const Co_t & oth) = delete;
 	Co_t(Co_t && oth) = delete;
 	~Co_t() = default;
 
+#ifdef __SCHED_CFS__
 	bool operator > (const Co_t & oth) const;
 	bool operator < (const Co_t & oth) const;
+#endif
 	void operator delete (void * ptr) noexcept = delete;
 };
 

@@ -6,10 +6,14 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <optional>
 
+#include "../utils/include/atomic_utils.h"
 #include "../utils/include/spin_lock.h"
+#include "../allocator/include/PmrAllocator.h"
 
+/*
 template<typename T, typename Allocator = std::allocator<uint8_t>>
 class QueueLockFree
 {
@@ -21,7 +25,6 @@ private:
         enum : uint16_t
         {
             REMOVAL = (1 << 0),
-            FULLY_LINKED = (1 << 1),
         };
 
         T data;
@@ -46,18 +49,6 @@ private:
             alloc.deallocate(reinterpret_cast<uint8_t*>(node), sizeof(Node));
         }
 
-        Node * getValidNext()
-        {
-            if (!validNode(this))
-                return nullptr;
-
-            Node * v_next = next.load(std::memory_order_acquire);
-            while (v_next && v_next->removal())
-                v_next = next.load(std::memory_order_relaxed);
-
-            return v_next;
-        }
-
         uint8_t flag() const { return m_flag.load(std::memory_order_acquire); }
         void setFlag(uint8_t f) { m_flag.store(f, std::memory_order_release); }
         bool removal() const { return flag() & REMOVAL; }
@@ -67,24 +58,6 @@ private:
         std::unique_lock<spin_lock_type> tryLock() { return std::unique_lock(alter_lock, std::try_to_lock); }
     };
 
-    static bool validNode(Node * node)
-    {
-        return node && !node->removal();
-    }
-
-    bool lockForAlter(
-        Node * pred, 
-        Node * self, 
-        std::unique_lock<spin_lock_type> & pred_guard)
-    {
-        pred_guard = pred->acquireLock();
-        if (pred->removal() || pred->next.load(std::memory_order_acquire) != self)
-            return false;
-        
-        return true;
-    }
-
-    /* 头插法 */
     std::atomic<Node *> head{}, tail{};
     std::atomic<size_t> m_size{0};
     Allocator alloc{};
@@ -110,7 +83,7 @@ public:
     }
 
     template<typename V>
-    void push_back(V data)
+    void push(V data)
     {
         Node * cur = Node::create(alloc);
         cur->data = std::forward<V>(data);
@@ -119,14 +92,13 @@ public:
         while (true)
         {
             cur_tail = tail.load(std::memory_order_acquire);
-            std::unique_lock<spin_lock_type> guard = cur_tail->tryLock();
-            if (!guard.owns_lock())
+            if (UNLIKELY(cur_tail->removal()))
                 continue;
-                
-            if (cur_tail->next.load(std::memory_order_acquire) == nullptr && !cur_tail->removal())
+
+            Node * expected_next = nullptr;
+            if (LIKELY(cur_tail->next.compare_exchange_weak(expected_next, cur, std::memory_order_acq_rel)))
             {
-                cur_tail->next.store(cur, std::memory_order_release);
-                tail.store(cur, std::memory_order_release);
+                tail.store(cur, std::memory_order_seq_cst);
                 break;
             }
         }
@@ -136,60 +108,62 @@ public:
 
     std::optional<T> try_pop()
     {
-        while (true)
+        Node * cur_head = head.load(std::memory_order_relaxed);
+
+        Node * nodeToBeDel{};
+        auto pop_fn = [&nodeToBeDel](Node * cur) -> Node *
         {
-            if (empty())
-                return std::nullopt;
+            if (cur == nullptr)
+                return nullptr;
 
-            Node * cur_head = head.load(std::memory_order_acquire);
-            Node * self = cur_head->next.load(std::memory_order_relaxed);
-            
-            bool isMarked = false;
-            Node * nodeToDel = nullptr;
-            std::unique_lock<spin_lock_type> self_guard;
-            while (true)
-            {
-                if (!isMarked && !validNode(self))
-                    break;
+            nodeToBeDel = cur;
+            cur->setRemoval();
+            return cur->next.load(std::memory_order_acquire);
+        };
+        atomic_fetch_modify(cur_head->next, pop_fn, std::memory_order_acq_rel);
 
-                if (!isMarked)
-                {
-                    nodeToDel = self;
-                    self_guard = nodeToDel->acquireLock();
-                    if (self->removal())
-                        break;
+        if (nodeToBeDel == nullptr)
+            return std::nullopt;
 
-                    nodeToDel->setRemoval();
-                    isMarked = true;
-                }
-
-                std::unique_lock<spin_lock_type> pred_guard;
-                if (!lockForAlter(cur_head, self, pred_guard))
-                {
-                    isMarked = false;
-                    break;
-                }
-
-                Node * succ = self->next.load(std::memory_order_acquire);
-                cur_head->next.store(succ, std::memory_order_release);
-
-                /* 如果删除尾节点 */
-                if (nodeToDel == tail.load(std::memory_order_acquire))
-                    tail.store(cur_head, std::memory_order_release);
-
-                break;
-            }
-
-            if (!isMarked)
-                continue;
-
-            std::optional<T> ans{std::move(nodeToDel->data)};
-            Node::destroy(alloc, nodeToDel);
-            m_size.fetch_sub(1, std::memory_order_seq_cst);
-            return ans;
-        }
+        auto tmp_self = nodeToBeDel;
+        tail.compare_exchange_weak(tmp_self, cur_head, std::memory_order_acq_rel);
+        std::optional<T> ans{std::move(nodeToBeDel->data)};
+        Node::destroy(alloc, nodeToBeDel);
+        m_size.fetch_sub(1, std::memory_order_acq_rel);
+        return ans;
     }
 
-    int32_t size() const { return m_size.load(std::memory_order_acquire); }
-    bool empty() const { return size() == 0; }
+    [[nodiscard]] int32_t size() const { return m_size.load(std::memory_order_acquire); }
+    [[nodiscard]] bool empty() const { return size() == 0; }
+};
+*/
+
+template<typename T, typename Allocator = std::allocator<uint8_t>>
+class QueueLockFree
+{
+public:
+    std::pmr::unsynchronized_pool_resource pool{get_default_pmr_opt()};
+    spin_lock m_lock{};
+    std::pmr::deque<T> m_q{&pool};
+
+    std::optional<T> try_pop()
+    {
+        std::lock_guard lock(m_lock);
+        if (m_q.empty())
+            return std::nullopt;
+
+        std::optional<T> ans{std::move(m_q.front())};
+        m_q.pop_front();
+        return ans;
+    }
+
+    template<typename V>
+    void push(V data)
+    {
+        std::lock_guard lock(m_lock);
+        m_q.push_back(std::forward<V>(data));
+    }
+
+    [[nodiscard]] int size() const { return m_q.size(); }
+    [[nodiscard]] bool empty() const { return m_q.empty(); }
 };

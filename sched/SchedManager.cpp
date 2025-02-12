@@ -7,10 +7,9 @@
 #include <vector>
 
 #include "../include/CoPrivate.h"
-#include "include/CfsSched.h"
-#include "utils.h"
+#include "include/Scheduler.h"
 
-void CfsSchedManager::apply(Co_t * co)
+void SchedManager::apply(Co_t * co)
 {
 	// 协程运行中
 	if (co->status == CO_RUNNING) [[unlikely]]
@@ -39,29 +38,27 @@ void CfsSchedManager::apply(Co_t * co)
 		}
 	}
 
-	co->sched.occupy_thread = min_scheduler_idx;
-	co->scheduler = schedulers[min_scheduler_idx].get();
 	schedulers[min_scheduler_idx]->apply_ready(co);
 }
 
-void CfsSchedManager::wakeup_await_co_all(Co_t * await_callee)
+void SchedManager::wakeup_await_co_all(Co_t * await_callee)
 {
 	if (await_callee == nullptr) [[unlikely]]
 		return;
 
-	std::lock_guard lock(await_callee->await_lock);
+    std::lock_guard lock(await_callee->await_caller_lock);
 	auto caller_q = &await_callee->await_caller;
 	while (!caller_q->empty())
 	{
 		auto cur = caller_q->front();
-		caller_q->pop();
+        caller_q->pop();
 
 		cur->await_callee = nullptr;
 		apply(cur);
 	}
 }
 
-std::vector<Co_t*> CfsSchedManager::stealing_work(int thread_from)
+std::vector<Co_t*> SchedManager::stealing_work(int thread_from)
 {
 	DASSERT(thread_from >= 0 && (size_t)thread_from < schedulers.size());
 #ifdef __STACK_STATIC__
@@ -80,12 +77,13 @@ std::vector<Co_t*> CfsSchedManager::stealing_work(int thread_from)
 	return res;
 }
 
-void CfsSchedManager::push_scheduler(const std::shared_ptr<CfsScheduler> & s)
+void SchedManager::push_scheduler(const std::shared_ptr<Scheduler> & s, int idx)
 {
 	std::lock_guard lock(w_lock);
-	schedulers.push_back(s);
+	schedulers.at(idx) = s;
+    scheduler_count++;
 	
 	/* vector init finish */
-	if (schedulers.size() == schedulers.capacity())
+	if (scheduler_count == schedulers.size())
 		init_lock.unlock();
 }

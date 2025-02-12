@@ -145,6 +145,11 @@ void make_context
 	void * arg
 );
 
+/* aware context switch */
+int aware_switch_context(Context *, Context *, int ret = CONTEXT_RESTORE); // 切换新context
+void aware_make_context(Context * ctx, void (*func)(void*), void * arg);
+void aware_make_context_wrap(Context * ctx, void (*wrap)(void (*)(void*), void *), void (*func)(void*), void * arg);
+
 void switch_context(Context *, int ret = CONTEXT_RESTORE); // 切换新context
 #if defined __x86_64__
 extern "C" int save_context(void * jmp_buf, bool * first_full_save); // 汇编实现

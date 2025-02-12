@@ -5,7 +5,7 @@
 #include <exception>
 
 #include "../utils/include/Invoker.h"
-#include "../sched/include/CfsSchedDef.h"
+#include "../sched/include/CfsSched.h"
 
 namespace co {
 	constexpr static uint64_t INVALID_CO_ID = 0;
