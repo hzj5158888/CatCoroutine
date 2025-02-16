@@ -10,7 +10,6 @@
 #include "include/CoPrivate.h"
 #include "include/CoCtx.h"
 #include "sched/include/Scheduler.h"
-#include "include/AllocatorGroup.h"
 #include "allocator/include/MemoryPool.h"
 
 #include "utils/include/utils.h"
@@ -20,6 +19,10 @@ namespace co_ctx {
 	bool is_init{false};
 	std::shared_ptr<SchedManager> manager{};
 	std::atomic<uint32_t> coroutine_count{co::MAIN_CO_ID};
+#ifdef __DEBUG_SCHED__
+    std::unordered_set<Co_t*> co_vec{};
+    spin_lock m_lock{};
+#endif
 	thread_local std::shared_ptr<local_t> loc{};
 }
 
@@ -111,11 +114,13 @@ namespace co {
 		Co_t * co = new Co_t{};
 		/* co->id == 1 */
 		co->id = co_ctx::coroutine_count++;
+        DEXPR(std::cout << "main coroutine, addr: " << co << std::endl;);
 #ifdef __SCHED_CFS__
 		co->sched.nice = PRIORITY_NORMAL;
 #endif
 		/* doesn't need to alloc stack */
 		/* just save context */
+        DASSERT((uint64_t)co > 1024 * 1024 * 1024);
 		int res = save_context(co->ctx.get_jmp_buf(), &co->ctx.first_full_save);
 		if (res == CONTEXT_RESTORE) // Restore Main Coroutine exec
 			return;
@@ -194,6 +199,7 @@ namespace co {
 
 		/* 打断当前 Coroutine */
 		auto running_co = co_ctx::loc->scheduler->running_co;
+        DASSERT((uint64_t)running_co > 1024 * 1024 * 1024);
 		int res = save_context(running_co->ctx.get_jmp_buf(), &running_co->ctx.first_full_save);
 		if (res == CONTEXT_RESTORE)
 			return;
@@ -213,9 +219,10 @@ namespace co {
 
     void yield()
 	{
-		[[unlikely]] DASSERT(co_ctx::loc->scheduler->running_co != nullptr);
+		DASSERT(co_ctx::loc->scheduler->running_co != nullptr);
 
 		auto running_co = co_ctx::loc->scheduler->running_co;
+        DASSERT((uint64_t)running_co > 1024 * 1024 * 1024);
 		int res = save_context(running_co->ctx.get_jmp_buf(), &running_co->ctx.first_full_save);
 		if (res == CONTEXT_RESTORE)
 			return;

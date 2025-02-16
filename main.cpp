@@ -13,6 +13,7 @@
 #include "test/include/test.h"
 #include "../data_structure/include/BitSetLockFree.h"
 #include "../data_structure/include/QueueLockFree.h"
+#include "Context.h"
 
 /*
 void list_free_test()
@@ -151,8 +152,7 @@ void bitset_test()
 	std::cout << idx.size() << std::endl;
 
 	std::vector<int> res{};
-	std::atomic<int> max_cnt = 0;
-	auto pick = [&res, &m_lock, &bs, &max_cnt]()
+	auto pick = [&res, &m_lock, &bs]()
 	{
 		while (true) 
 		{

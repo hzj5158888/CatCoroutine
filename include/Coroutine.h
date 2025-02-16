@@ -10,7 +10,7 @@
 namespace co {
 	constexpr static uint64_t INVALID_CO_ID = 0;
 	constexpr static uint64_t MAIN_CO_ID = 1;
-	constexpr static uint64_t MAX_STACK_SIZE = 1024 * 1024 * 1; // 1 MB
+	constexpr static uint64_t MAX_STACK_SIZE = 1024 * 1024 * 2; // 1 MB
 	constexpr static uint16_t CPU_CORE = __CPU_CORE__;
 	constexpr static uint64_t STATIC_STACK_SIZE = 1024 * 1024 * 8; // 8MB
 	constexpr static uint64_t STATIC_STK_NUM = 256;

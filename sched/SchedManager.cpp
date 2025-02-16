@@ -12,16 +12,16 @@
 void SchedManager::apply(Co_t * co)
 {
 	// 协程运行中
-	if (co->status == CO_RUNNING) [[unlikely]]
+	if (UNLIKELY(co->status == CO_RUNNING))
 		throw ApplyRunningCoException();
 	// 协程在调度器中
-	if (co->status == CO_READY && co->scheduler != nullptr) [[unlikely]]
+	if (UNLIKELY(co->status == CO_READY && co->scheduler != nullptr))
 		assert(false);
 
-	/* back to origin coroutine */
+	/* back to origin thread */
 	if (co->sched.occupy_thread != -1)
 	{
-		schedulers[co->sched.occupy_thread]->apply_ready(co);
+		schedulers.at(co->sched.occupy_thread)->apply_ready(co);
 		return;
 	}
 
@@ -38,14 +38,12 @@ void SchedManager::apply(Co_t * co)
 		}
 	}
 
-	schedulers[min_scheduler_idx]->apply_ready(co);
+	schedulers.at(min_scheduler_idx)->apply_ready(co);
 }
 
 void SchedManager::wakeup_await_co_all(Co_t * await_callee)
 {
-	if (await_callee == nullptr) [[unlikely]]
-		return;
-
+    DASSERT(await_callee != nullptr);
     std::lock_guard lock(await_callee->await_caller_lock);
 	auto caller_q = &await_callee->await_caller;
 	while (!caller_q->empty())

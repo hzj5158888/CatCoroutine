@@ -109,3 +109,18 @@ inline constexpr std::pmr::pool_options get_default_pmr_opt()
         1024 * 1024 * 4
     };
 }
+
+inline void spin_wait(uint32_t spin_count)
+{
+    while (spin_count--) { __builtin_ia32_pause(); }
+}
+
+template<typename Fn>
+inline bool spin_wait(int32_t spin_count, Fn && fn)
+{
+    static_assert(std::is_invocable_r_v<bool, Fn>);
+
+    bool ans{false};
+    while (spin_count-- > 0 && !(ans = fn())) { __builtin_ia32_pause(); }
+    return ans;
+}

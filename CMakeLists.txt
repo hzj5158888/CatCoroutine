@@ -54,7 +54,7 @@ include_directories(${Boost_INCLUDE_DIRS})
 enable_language(ASM)
 set(CMAKE_CXX_COMPILER /usr/bin/g++-13)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -Wall -fPIE -Werror -fno-omit-frame-pointer")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -Wall -Werror -fno-omit-frame-pointer")
 add_executable(Coroutine ${main} ${data_structure} ${allocator} ${context} ${utils} ${sched} ${sync} ${test})
 
 # basic configuration
@@ -62,7 +62,8 @@ add_compile_definitions(__CPU_CORE__=8)
 add_compile_definitions(__CACHE_LINE__=64)
 
 # debug flag
-#add_compile_definitions(__DEBUG__)
+add_compile_definitions(__DEBUG__)
+add_compile_definitions(__DEBUG_SCHED__)
 
 # memory pool
 #add_compile_definitions(__MEM_PMR__)
@@ -80,6 +81,10 @@ add_compile_definitions(__SCHED_HEAP__)
 add_compile_definitions(__STACK_DYN__)
 #add_compile_definitions(__STACK_DYN_MMAP__)
 #add_compile_definitions(__STACK_STATIC__)
+
+# context
+#add_compile_definitions(__CONTEXT_STACK_PROTECTOR__)
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
 
 # pthread
 target_link_libraries(Coroutine pthread ${Boost_LIBRARIES})

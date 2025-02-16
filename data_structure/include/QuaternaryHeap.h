@@ -76,7 +76,7 @@ public:
         pushup(m_data.size() - 1);
     }
 
-    const T top() const { DASSERT(!empty()); return m_data[1]; }
+    T top() const { DASSERT(!empty()); return m_data[1]; }
     [[nodiscard]] int size() const { return (int)m_data.size() - 1; }
     [[nodiscard]] bool empty() const { return (int)m_data.size() - 1 <= 0; }
 };

@@ -19,25 +19,25 @@ namespace co {
 	class ChannelClosedException : public std::exception
 	{
 	public:
-		const char * what() const throw ()
+		[[nodiscard]] const char * what() const noexcept override
 		{
 			return "ChannelClosedException";
 		}
 	};
 
-	template<typename T, std::size_t size>
+	template<typename T, std::size_t SIZE = 1>
 	class Channel
 	{
 	private:
-		RingBuffer<T, size> buffer{};
+		RingBuffer<T, SIZE> buffer{};
 		std::atomic<bool> is_close{false};
-		Semaphore sem_full{}, sem_empty{size};
-		Mutex m_lock{};
+		Semaphore sem_full{}, sem_empty{SIZE};
+        spin_lock m_lock{};
 
 		template<class V>
 		void push(V x)
 		{
-			if (is_close) [[unlikely]]
+			if (UNLIKELY(is_close.load(std::memory_order_acquire)))
 				throw ChannelClosedException();
 
 			sem_empty.wait();
@@ -47,17 +47,17 @@ namespace co {
 			sem_full.signal();
 		}
 	public:
-		inline Channel() = default;
-		inline Channel(const Channel & chan) = delete;
-		inline Channel(Channel && chan) = delete;
+        Channel() = default;
+        Channel(const Channel & chan) = delete;
+        Channel(Channel && chan) = delete;
 		inline ~Channel() { close(); }
 
 		inline void push(const T & x) { push<const T &>(std::forward<const T &>(x)); }
 		inline void push(T && x) { push<T &&>(std::move(x)); }
 
-		inline T && pull()
+		inline T pull()
 		{
-			if (is_close && sem_full == 0) [[unlikely]]
+			if (UNLIKELY(is_close && (int64_t)sem_full == 0))
 				throw ChannelClosedException();
 
 			sem_full.wait();
@@ -65,11 +65,11 @@ namespace co {
 			auto ans = std::move(buffer.pop());
 			m_lock.unlock();
 			sem_empty.signal();
-
-			return std::move(ans);
+			return ans;
 		}
 
 		inline void close() { is_close = true; }
+        [[nodiscard]] inline int32_t size() const { return buffer.size(); }
 	};
 }
 

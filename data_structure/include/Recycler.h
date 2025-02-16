@@ -114,7 +114,7 @@ public:
         }
 #else
         auto & [q, m_lock] = pool[type];
-        m_lock.lock();
+        m_lock.m_lock();
         if (q.size() > TRY_RECYCLE_SIZE && needToDelete(q.front()))
         {
             info node_info = q.front();

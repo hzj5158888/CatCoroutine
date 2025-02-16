@@ -9,6 +9,8 @@
 
 #include "include/test.h"
 #include "../include/Coroutine.h"
+#include "../sync/include/Semaphore.h"
+#include "../sync/include/Channel.h"
 
 std::chrono::nanoseconds start_time;
 
@@ -57,7 +59,34 @@ void basic_test()
 	end_of_test();
 }
 
-void switch_test()
+void single_switch_test()
+{
+    auto work_loop = [] (std::atomic<int> & g_count)
+    {
+        constexpr auto switch_round = 1000000000;
+        for (int i = 0; i < switch_round; i++)
+        {
+            //std::cout << g_count;
+            //std::cout << "\n";
+
+            g_count.fetch_add(1, std::memory_order_seq_cst);
+            co::yield();
+        }
+    };
+
+    std::cout << "single coroutine switch test" << std::endl;
+    start_cal();
+
+    std::atomic<int> g_count{};
+    co::Co c{work_loop, std::ref(g_count)};
+    c.await();
+    std::cout << "single coroutine switch_count = " << g_count << std::endl;
+
+    end_cal();
+    end_of_test();
+}
+
+void multiple_switch_test()
 {
 	std::ios::sync_with_stdio(false);
 	auto work_loop = [] (std::atomic<int> & g_count)
@@ -73,17 +102,16 @@ void switch_test()
 		}
 	};
 
-	struct coro
+	struct co_pair
 	{
 		co::Co<co::PRIORITY_NORMAL> x, y;
 	};
 
-	constexpr auto coroutine_cnt = 500000;
+	std::cout << "multiple coroutine switch test" << std::endl;
 
-	std::cout << "coroutine switch test" << std::endl;
-
-	std::atomic<int> g_count{};
-	std::vector<coro> vec{};
+    constexpr auto coroutine_cnt = 500000;
+    std::atomic<int> g_count{};
+	std::vector<co_pair> vec{};
 	vec.reserve(coroutine_cnt / 2);
 	start_cal();
 	for (int i = 0; i < coroutine_cnt / 2; i++)
@@ -102,14 +130,148 @@ void switch_test()
 	}
 
 	std::ios::sync_with_stdio(true);
-	std::cout << "switch_count = " << g_count << std::endl;
+	std::cout << "multiple multiple switch_count = " << g_count << std::endl;
 	end_cal();
 	end_of_test();
 }
 
+void semaphore_test()
+{
+    std::ios::sync_with_stdio(false);
+
+    auto work_loop = [] (co::Semaphore & x, co::Semaphore & y, int flag)
+    {
+        constexpr auto print_round = 2000;
+        for (int i = 0; i < print_round; i++)
+        {
+            //std::cout << g_count;
+            //std::cout << "\n";
+
+            if (i & 1)
+            {
+                if (flag)
+                    x.signal();
+                else
+                    y.wait();
+            } else {
+                if (flag)
+                    y.signal();
+                else
+                    x.wait();
+            }
+
+            co::yield();
+        }
+    };
+
+    struct co_pair
+    {
+        co::Co<co::PRIORITY_NORMAL> x, y;
+    };
+
+    std::cout << "coroutine semaphore test" << std::endl;
+
+    constexpr auto coroutine_cnt = 500000;
+    co::Semaphore x{}, y{};
+    std::vector<co_pair> vec{};
+    vec.reserve(coroutine_cnt / 2);
+    start_cal();
+    for (int i = 0; i < coroutine_cnt / 2; i++)
+    {
+        //auto c1 = co::Co{work_loop, "<X, " + std::to_string(i) + ">: ", std::ref(g_count)};
+        //auto c2 = co::Co{work_loop, "<Y, " + std::to_string(i) + ">: ", std::ref(g_count)};
+        auto c1 = co::Co{work_loop, std::ref(x), std::ref(y), true};
+        auto c2 = co::Co{work_loop, std::ref(x), std::ref(y), false};
+        vec.push_back({std::move(c1), std::move(c2)});
+    }
+
+    for (auto & [c1, c2] : vec)
+    {
+        c1.await();
+        c2.await();
+    }
+
+    std::ios::sync_with_stdio(true);
+    std::cout << "coroutine semaphore count = " << static_cast<int64_t>(x) << ", " << static_cast<int64_t>(y) << std::endl;
+    end_cal();
+    end_of_test();
+}
+
+void channel_test()
+{
+    std::ios::sync_with_stdio(false);
+
+    using chan_t = co::Channel<int, 128>;
+
+    std::atomic<int> d_print_count{};
+    std::array<std::atomic<int>, 2000> count;
+    auto work_loop = [&count, &d_print_count] (chan_t & chan, int co_idx, int flag)
+    {
+        constexpr auto print_round = 2000;
+        for (int i = 0; i < print_round; i++)
+        {
+            //std::cout << g_count;
+            //std::cout << "\n";
+            if (flag)
+            {
+                chan.push(i);
+                count[i]++;
+            } else {
+                int res = chan.pull();
+                count[res]--;
+            }
+            co::yield();
+        }
+
+        if ((++d_print_count) % 2048 == 0)
+        {
+            std::string s = "coroutine end, " + std::to_string(co_idx);
+            std::cout << s << std::endl;
+        }
+    };
+
+    struct co_pair
+    {
+        co::Co<co::PRIORITY_NORMAL> x, y;
+    };
+
+    std::cout << "coroutine channel test" << std::endl;
+
+    constexpr auto coroutine_cnt = 500000;
+    chan_t chan{};
+    std::vector<co_pair> vec{};
+    vec.reserve(coroutine_cnt / 2);
+    start_cal();
+    for (int i = 0; i < coroutine_cnt / 2; i++)
+    {
+        //auto c1 = co::Co{work_loop, "<X, " + std::to_string(i) + ">: ", std::ref(g_count)};
+        //auto c2 = co::Co{work_loop, "<Y, " + std::to_string(i) + ">: ", std::ref(g_count)};
+        auto c1 = co::Co{work_loop, std::ref(chan), i, true};
+        auto c2 = co::Co{work_loop, std::ref(chan), coroutine_cnt / 2 + i, false};
+        vec.push_back({std::move(c1), std::move(c2)});
+    }
+
+    for (auto & [c1, c2] : vec)
+    {
+        c1.await();
+        c2.await();
+    }
+
+    std::ios::sync_with_stdio(true);
+    std::cout << "coroutine channel elem count = " << static_cast<int64_t>(chan.size()) << std::endl;
+    end_cal();
+
+    for (int i = 0; i < 2000; i++)
+        assert(count[i] == 0 && "unclear count");
+
+    end_of_test();
+}
+
 void test()
 {
-	std::cout << "test 1" << std::endl;
 	//basic_test();
-	switch_test();
+    //single_switch_test();
+    //multiple_switch_test();
+    //semaphore_test();
+    channel_test();
 }

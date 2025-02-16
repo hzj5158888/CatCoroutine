@@ -16,17 +16,17 @@ namespace co {
 	void sem_wait(void * handle);
 	bool sem_try_wait(void * handle);
 	void sem_signal(void * handle);
-	int32_t sem_get_count(void * handle);
+    int64_t sem_get_count(void * handle);
 
 	class SemaphoreCreateException : public std::exception
 	{
 	public:
-		const char * what() const noexcept override { return "Coroutine Semaphore Create Failed"; }
+		[[nodiscard]] const char * what() const noexcept override { return "Coroutine Semaphore Create Failed"; }
 	};
 	class SemaphoreUnInitializationException : public std::exception
 	{
 	public:
-		const char * what() const noexcept override { return "Coroutine Semaphore UnInitialization"; }
+		[[nodiscard]] const char * what() const noexcept override { return "Coroutine Semaphore UnInitialization"; }
 	};
 	class SemaphoreDestroyException : public std::exception
 	{
@@ -37,7 +37,7 @@ namespace co {
 	class Semaphore
 	{
 	private:
-		void * handle{};
+        void * handle{};
 	public:
 		inline Semaphore();
 		inline explicit Semaphore(uint32_t x);
@@ -49,7 +49,7 @@ namespace co {
 		inline void wait();
 		inline bool try_wait();
 		inline void swap(Semaphore && sem);
-		inline operator int32_t () const;
+		inline explicit operator int64_t () const;
 	};
 
 	Semaphore::Semaphore()
@@ -103,5 +103,5 @@ namespace co {
 
 	void Semaphore::swap(Semaphore && sem) { std::swap(handle, sem.handle); }
 
-	Semaphore::operator int32_t() const { return sem_get_count(handle); }
+	Semaphore::operator int64_t() const { return sem_get_count(handle); }
 }

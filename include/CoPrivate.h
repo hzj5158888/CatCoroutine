@@ -49,6 +49,9 @@ struct Co_t
 	Co_t * await_callee{}; // await 谁
     spin_lock await_caller_lock{};
     std::queue<Co_t*> await_caller{}; // 谁 await
+#ifdef __DEBUG__
+    void * sem_ptr{};
+#endif
 
     // 调度信息
 #ifdef __SCHED_CFS__

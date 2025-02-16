@@ -72,7 +72,7 @@ public:
         Node * cur = head;
         while (cur)
         {
-            cur->alter_lock.lock();
+            cur->alter_lock.m_lock();
             Node * next = cur->next;
             Node::destroy(alloc, cur);
             cur = next;

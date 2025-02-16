@@ -68,12 +68,12 @@ public:
         return true;
     }
 
-    T && pop()
+    T pop()
     {
-        assert(!empty());
         auto tmp = front++;
         front %= N;
-        return std::move(m_data[tmp]);
+        m_size--;
+        return m_data[tmp];
     }
 };
 

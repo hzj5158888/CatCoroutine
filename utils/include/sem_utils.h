@@ -9,7 +9,10 @@
 #include <cstdlib>
 #include <cstdint>
 #include <exception>
+#include <cerrno>
 #include <semaphore.h>
+
+#include "utils.h"
 
 class CountingSemCreateException : public std::exception {
 public:
@@ -23,7 +26,7 @@ class CountingSemModifyException : public std::exception
 public:
     int err_code{};
 
-    CountingSemModifyException(int code) : err_code(code) {}
+    explicit CountingSemModifyException(int code) : err_code(code) {}
 
     [[nodiscard]] const char * what() const noexcept override 
     {
@@ -45,7 +48,7 @@ public:
 
 counting_semaphore::counting_semaphore(uint32_t count) {
   int res = sem_init(&sem, 0, count);
-  if (res != 0)
+    if (UNLIKELY(res != 0))
     throw CountingSemCreateException();
 }
 
@@ -54,21 +57,31 @@ inline counting_semaphore::~counting_semaphore() { sem_destroy(&sem); }
 inline void counting_semaphore::wait() 
 { 
     int res = sem_wait(&sem);
-    if (res != 0)
-      throw CountingSemModifyException(res);
+    if (UNLIKELY(res != 0))
+      throw CountingSemModifyException(errno);
 }
 
 inline void counting_semaphore::signal() 
 { 
     int res = sem_post(&sem);
-    if (res != 0)
-      throw CountingSemModifyException(res);
+    if (UNLIKELY(res != 0))
+      throw CountingSemModifyException(errno);
 }
 
 inline void counting_semaphore::signal(uint32_t count) 
 { 
-    for (; count != 0; count--)
+    for (; count > 0; count--)
       signal();
 }
 
-inline bool counting_semaphore::try_wait() { return sem_trywait(&sem) == 0; }
+inline bool counting_semaphore::try_wait()
+{
+    int err = 0;
+    int res = sem_trywait(&sem);
+    if (LIKELY(res == 0))
+        return true;
+    else if ((err = errno) == EAGAIN)
+        return false;
+    else
+        throw CountingSemModifyException(err);
+}

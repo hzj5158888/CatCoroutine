@@ -12,7 +12,7 @@ void Scheduler::push_to_ready(Co_t * co, bool enable_lock)
 	std::unique_lock<spin_lock> lock;
 #if __SCHED_RB_TREE__
 	if (enable_lock)
-		lock = std::unique_lock(sched_lock);
+		m_lock = std::unique_lock(sched_lock);
 
 	ready.insert(co);
 #elif __SCHED_HEAP__
@@ -23,6 +23,13 @@ void Scheduler::push_to_ready(Co_t * co, bool enable_lock)
 		ready.push(co);
 	else
 		ready_fixed.push(co);
+
+#ifdef __DEBUG_SCHED__
+    co_ctx::m_lock.lock();
+    co_ctx::co_vec.insert(co);
+    co_ctx::m_lock.unlock();
+#endif
+
 #elif __SCHED_FIFO__
     if (co->sched.can_migration)
 		ready.push(co);
@@ -33,15 +40,22 @@ void Scheduler::push_to_ready(Co_t * co, bool enable_lock)
 
 void Scheduler::pull_half_co(std::vector<Co_t*> & ans)
 {
-	if (ready.empty())
-		return;
+    if (ready.empty())
+        return;
+
 #ifdef __SCHED_CFS__
 	std::lock_guard lock(sched_lock);
+    /* double check */
+    if (ready.empty())
+        return;
 #endif
     int trans_size = 0;
 	int pull_count = ready.size() / 2;
 	for (; trans_size < pull_count; trans_size++)
 	{
+        if (!sem_ready.try_wait())
+            break;
+
 #ifdef __SCHED_CFS__
 #ifdef __SCHED_HEAP__
         ans.push_back(ready.top());
@@ -56,12 +70,15 @@ void Scheduler::pull_half_co(std::vector<Co_t*> & ans)
 
         ans.push_back(co_opt.value());
 #endif
+#ifdef __DEBUG_SCHED__
+        co_ctx::m_lock.lock();
+        co_ctx::co_vec.erase(ans.back());
+        co_ctx::m_lock.unlock();
+#endif
 		remove_from_scheduler(ans.back());
 		ans.back()->sched.occupy_thread = -1;
-		if (UNLIKELY(!sem_ready.try_wait()))
-            break;
 	}
-    ready_count.fetch_sub(trans_size, std::memory_order_acq_rel);
+    ready_count.fetch_sub(trans_size);
 }
 
 void Scheduler::apply_ready(Co_t * co)
@@ -83,7 +100,7 @@ void Scheduler::apply_ready(Co_t * co)
 	co->status_lock.unlock();
 
 	push_to_ready(co, true);
-	ready_count.fetch_add(1, std::memory_order_acq_rel);
+	ready_count.fetch_add(1);
 	sem_ready.signal();
 }
 
@@ -123,7 +140,7 @@ void Scheduler::apply_ready_all(const std::vector<Co_t *> & co_vec)
     sched_lock.unlock();
 #endif
 
-	ready_count.fetch_add(co_vec.size(), std::memory_order_acq_rel);
+	ready_count.fetch_add(co_vec.size());
 	sem_ready.signal(co_vec.size());
 }
 
@@ -143,11 +160,15 @@ Co_t * Scheduler::pickup_ready()
 		apply_ready_all(res);
 		sem_ready.wait();
 	}
-	ready_count.fetch_sub(1, std::memory_order_acq_rel);
+	ready_count.fetch_sub(1);
+
+    sched_lock.lock();
+    DASSERT(!(ready.empty() && ready_fixed.empty()));
+    sched_lock.unlock();
 
 #ifdef __SCHED_CFS__
 #ifdef __SCHED_RB_TREE__
-	sched_lock.lock();
+	sched_lock.m_lock();
 	auto iter = ready.begin();
 	auto ans = *iter;
 	ready.erase(iter);
@@ -157,7 +178,7 @@ Co_t * Scheduler::pickup_ready()
 	sched_lock.unlock();
 #elif __SCHED_HEAP__
 	sched_lock.lock();
-	
+
 	Co_t * ans{};
 	Co_t * ans_list[2]{nullptr, nullptr};
 	if (!ready.empty())
@@ -178,9 +199,9 @@ Co_t * Scheduler::pickup_ready()
 
 	auto up_v_runtime_fn = [this](uint64_t cur_v_time) -> uint64_t
 	{
-		if (!ready.empty()) [[likely]]
+		if (!ready.empty())
 			cur_v_time = std::min(cur_v_time, ready.top()->sched.v_runtime);
-		if (!ready_fixed.empty()) [[likely]]
+		if (!ready_fixed.empty())
 			cur_v_time = std::min(cur_v_time, ready_fixed.top()->sched.v_runtime);
 
 		return cur_v_time;
@@ -210,6 +231,11 @@ Co_t * Scheduler::pickup_ready()
 #endif
 
     DASSERT(ans->status == CO_READY);
+#ifdef __DEBUG_SCHED__
+    co_ctx::m_lock.lock();
+    co_ctx::co_vec.erase(ans);
+    co_ctx::m_lock.unlock();
+#endif
 	return ans;
 }
 
@@ -219,11 +245,11 @@ void Scheduler::run(Co_t * co) // 会丢失当前上下文，最后执行
 
 	co->status_lock.lock();
 	co->sched.start_exec();
-	if (co->id != co::MAIN_CO_ID)  [[likely]] // 设置 非main coroutine 栈帧
+	if (LIKELY(co->id != co::MAIN_CO_ID)) // 设置 非main coroutine 栈帧
 	{
 #ifdef __STACK_STATIC__
 		/* 设置stack分配器 */
-		if (co->ctx.static_stk_pool == nullptr) [[unlikely]]
+		if (UNLIKELY(co->ctx.static_stk_pool == nullptr))
 			co->ctx.static_stk_pool = &co_ctx::loc->alloc.stk_pool;
 
 		/* 分配堆栈 */
@@ -245,7 +271,6 @@ void Scheduler::run(Co_t * co) // 会丢失当前上下文，最后执行
 Co_t * Scheduler::interrupt(int new_status, bool unlock_exit)
 {
 	DASSERT(running_co != nullptr);
-
 	running_co->status_lock.lock();
 	/* update the status */
 	running_co->status = new_status;
@@ -256,7 +281,6 @@ Co_t * Scheduler::interrupt(int new_status, bool unlock_exit)
 	running_co->sched.up_v_runtime();
 	sum_v_runtime.fetch_add(running_co->sched.v_runtime, std::memory_order_acq_rel);
 #endif
-
 	/* unlock before exit */
 	if (unlock_exit)
 		running_co->status_lock.unlock();
@@ -289,7 +313,7 @@ void Scheduler::coroutine_yield()
 	
 #ifdef __STACK_STATIC__
 	/* release static stack */
-	if (yield_co->ctx.static_stk_pool != nullptr) [[likely]]
+	if (LIKELY(yield_co->ctx.static_stk_pool != nullptr))
 		yield_co->ctx.static_stk_pool->release_stack(yield_co);
 #endif
 
@@ -343,6 +367,12 @@ void Scheduler::coroutine_dead()
 	}
 #endif
 
+#ifdef __DEBUG_SCHED__
+    co_ctx::m_lock.lock();
+    co_ctx::co_vec.erase(dead_co);
+    co_ctx::m_lock.unlock();
+#endif
+
 	dead_co->status = CO_DEAD;
 	dead_co->status_lock.unlock();
 }
@@ -372,7 +402,8 @@ void Scheduler::process_callback(int arg)
 	while (true)
 	{
 		int res = save_context(sched_ctx.get_jmp_buf(), &sched_ctx.first_full_save);
-		if (res != CONTEXT_CONTINUE)
+        DASSERT((uint64_t)sched_ctx.get_jmp_buf() > 1024 * 1024 * 1024);
+        if (res != CONTEXT_CONTINUE)
 		{
 			process_callback(res);
 			continue;

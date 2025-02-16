@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <bits/wordsize.h>
 #include <csetjmp>
 #include <cstddef>
 #include <cstdio>
@@ -16,9 +15,6 @@
 #include "../allocator/include/StackPoolDef.h"
 #include "../allocator/include/DynStackPoolDef.h"
 #include "Coroutine.h"
-
-constexpr std::size_t SAVE_SIG_MASK = 1;
-constexpr std::size_t SIGSET_WORDS = (1024 / (8 * sizeof (unsigned long int)));
 
 enum
 {
@@ -60,6 +56,10 @@ struct Context
         uint64_t ip; 	// rip, program counter
 		uint32_t mxcsr; // sse2 control and status word, offset=64
 		uint32_t x87cw; // x87 fpu control word, offset=68
+#ifdef __CONTEXT_STACK_PROTECTOR__
+        uint64_t stk_protector;
+#endif
+        uint64_t fence[1];
 #else
         void * bx;
         void * si, * di; // index register
@@ -124,10 +124,16 @@ struct Context
 		{
 			DASSERT((size_t)stk_real_bottom - jmp_reg.sp <= co::MAX_STACK_SIZE);
 			DASSERT((size_t)stk_real_bottom >= jmp_reg.bp);
-		}
+		} else {
+            if (stk_dyn_real_bottom == nullptr)
+                return;
+
+            DASSERT((size_t)stk_dyn_real_bottom - jmp_reg.sp <= co::MAX_STACK_SIZE);
+            DASSERT((size_t)stk_dyn_real_bottom >= jmp_reg.bp);
+        }
 	}
 
-    void * get_jmp_buf() { return std::launder(&jmp_reg); }
+    void * get_jmp_buf() { return std::launder(std::addressof(jmp_reg)); }
 };
 
 void make_context_wrap
@@ -145,14 +151,24 @@ void make_context
 	void * arg
 );
 
-/* aware context switch */
-int aware_switch_context(Context *, Context *, int ret = CONTEXT_RESTORE); // 切换新context
-void aware_make_context(Context * ctx, void (*func)(void*), void * arg);
-void aware_make_context_wrap(Context * ctx, void (*wrap)(void (*)(void*), void *), void (*func)(void*), void * arg);
-
 void switch_context(Context *, int ret = CONTEXT_RESTORE); // 切换新context
+void switch_sched_context(Context *, int ret = CONTEXT_RESTORE);
 #if defined __x86_64__
-extern "C" int save_context(void * jmp_buf, bool * first_full_save); // 汇编实现
-extern "C" int _switch_context(void * jmp_buf, int ret); // 汇编实现
+extern "C" int save_context(
+        void * jmp_buf,
+        bool * first_full_save,
+        uint64_t reserve1 = 0,
+        uint64_t reserve2 = 0,
+        uint64_t reserve3 = 0,
+        uint64_t reserve4 = 0
+); // 汇编实现
+extern "C" int _switch_context(
+        void * jmp_buf,
+        int ret,
+        uint64_t reserve1 = 0,
+        uint64_t reserve2 = 0,
+        uint64_t reserve3 = 0,
+        uint64_t reserve4 = 0
+);
 extern "C" void switch_context_first_full_save(void *, uint64_t rdi, uint64_t rsi); // 汇编实现
 #endif
