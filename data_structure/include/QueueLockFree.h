@@ -13,7 +13,6 @@
 #include "../utils/include/spin_lock.h"
 #include "../allocator/include/PmrAllocator.h"
 
-/*
 template<typename T, typename Allocator = std::allocator<uint8_t>>
 class QueueLockFree
 {
@@ -72,7 +71,6 @@ public:
         Node * cur = head;
         while (cur)
         {
-            cur->alter_lock.m_lock();
             Node * next = cur->next;
             Node::destroy(alloc, cur);
             cur = next;
@@ -135,35 +133,4 @@ public:
 
     [[nodiscard]] int32_t size() const { return m_size.load(std::memory_order_acquire); }
     [[nodiscard]] bool empty() const { return size() == 0; }
-};
-*/
-
-template<typename T, typename Allocator = std::allocator<uint8_t>>
-class QueueLockFree
-{
-public:
-    std::pmr::unsynchronized_pool_resource pool{get_default_pmr_opt()};
-    spin_lock m_lock{};
-    std::pmr::deque<T> m_q{&pool};
-
-    std::optional<T> try_pop()
-    {
-        std::lock_guard lock(m_lock);
-        if (m_q.empty())
-            return std::nullopt;
-
-        std::optional<T> ans{std::move(m_q.front())};
-        m_q.pop_front();
-        return ans;
-    }
-
-    template<typename V>
-    void push(V data)
-    {
-        std::lock_guard lock(m_lock);
-        m_q.push_back(std::forward<V>(data));
-    }
-
-    [[nodiscard]] int size() const { return m_q.size(); }
-    [[nodiscard]] bool empty() const { return m_q.empty(); }
 };

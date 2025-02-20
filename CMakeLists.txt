@@ -25,6 +25,7 @@ aux_source_directory(${CONTEXT_PATH} context)
 set(context ${context} ${CONTEXT_PATH}/switch_context_first_run.S)
 set(context ${context} ${CONTEXT_PATH}/_switch_context.S)
 set(context ${context} ${CONTEXT_PATH}/save_context.S)
+set(context ${context} ${CONTEXT_PATH}/swap_context_impl.S)
 
 # utils
 set(UTILS_PATH ${SRC}/utils)
@@ -62,8 +63,10 @@ add_compile_definitions(__CPU_CORE__=8)
 add_compile_definitions(__CACHE_LINE__=64)
 
 # debug flag
-add_compile_definitions(__DEBUG__)
-add_compile_definitions(__DEBUG_SCHED__)
+#add_compile_definitions(__DEBUG__)
+#add_compile_definitions(__DEBUG_SCHED__)
+#add_compile_definitions(__DEBUG_SCHED_RUN__)
+#add_compile_definitions(__DEBUG_SCHED_READY__)
 
 # memory pool
 #add_compile_definitions(__MEM_PMR__)
@@ -85,6 +88,7 @@ add_compile_definitions(__STACK_DYN__)
 # context
 #add_compile_definitions(__CONTEXT_STACK_PROTECTOR__)
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
+#set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-stack-protector")
 
 # pthread
 target_link_libraries(Coroutine pthread ${Boost_LIBRARIES})

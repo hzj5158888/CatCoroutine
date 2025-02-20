@@ -5,6 +5,7 @@
 #pragma once
 
 #include <cerrno>
+#include <cstddef>
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -44,6 +45,7 @@ public:
   inline void signal();
   inline void signal(uint32_t count);
   inline bool try_wait();
+  inline int count();
 };
 
 counting_semaphore::counting_semaphore(uint32_t count) {
@@ -84,4 +86,14 @@ inline bool counting_semaphore::try_wait()
         return false;
     else
         throw CountingSemModifyException(err);
+}
+
+inline int counting_semaphore::count()
+{
+    int ans{}, err{};
+    int res = sem_getvalue(&sem, &ans);
+    if (LIKELY(res == 0))
+      return ans;
+    else
+      throw CountingSemModifyException((err = errno));
 }

@@ -1,7 +1,5 @@
 #pragma once
 
-#include <cstddef>
-#include <memory>
 #include <utility>
 #include <vector>
 
@@ -36,7 +34,7 @@ private:
             for (int i = 0; i < 4; i++)
             {
                 int cur_son = get_son(u, i);
-                if (cur_son >= cur_size) [[unlikely]]
+                if (UNLIKELY(cur_son > (cur_size >> 2)))
                     return;
 
                 if (!m_cmp(m_data[u], m_data[cur_son]))
@@ -65,7 +63,7 @@ public:
         DASSERT(!empty());
         std::swap(m_data[1], m_data.back());
         m_data.pop_back();
-		if (!empty()) [[likely]]
+		if (LIKELY(!empty()))
 			pushdown(1);
     }
 
@@ -74,6 +72,18 @@ public:
     {
         m_data.push_back(std::forward<F>(data));
         pushup(m_data.size() - 1);
+    }
+
+    template<typename F>
+    void push_all(const std::vector<F> & data)
+    {
+        if (UNLIKELY(data.empty()))
+            return;
+
+        int start_idx = (int)m_data.size();
+        m_data.insert(m_data.end(), data.begin(), data.end());
+        for (int i = start_idx; i < (int)m_data.size(); i++)
+            pushup(i);
     }
 
     T top() const { DASSERT(!empty()); return m_data[1]; }

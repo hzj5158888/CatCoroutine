@@ -8,6 +8,7 @@
 #include <cstdint>
 
 namespace co {
+    void wrap(void (*func)(void*), void * arg);
 }
 
 #endif //COROUTINE_CO_UTILS_H

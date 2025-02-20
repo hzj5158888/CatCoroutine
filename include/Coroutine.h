@@ -52,49 +52,33 @@ namespace co {
     {
     private:
 		void * handle{};
-		static_assert(NICE >= -20 && NICE <= 19);
     public:
 
 		Co() = default;
         Co(const Co & oth) = delete;
-        template<typename Fn, typename... Args> explicit
-        Co(Fn && fn, Args &&... args);
-        Co(Co && co) noexcept;
+
+		template<typename Fn, typename ... Args>
+        explicit Co(Fn && fn, Args &&... args)
+		{
+			using Invoker = Invoker<Fn, Args...>;
+			auto [alloc_self, alloc_func] = get_invoker_alloc();
+			auto invoker_memory = alloc_func(alloc_self, sizeof(Invoker));
+			auto invoker = new (invoker_memory) Invoker(std::forward<Fn>(fn), std::forward<Args>(args)...);
+			invoker->allocator = alloc_self;
+			this->handle = create(invoker, NICE);
+			if (this->handle == nullptr)
+				throw CoCreateException();
+		}
+
+        Co(Co && co) noexcept { swap(std::move(co)); }
         
-        ~Co();
+        ~Co()
+		{
+			if (handle != nullptr)
+				co::destroy(handle);
+		}
     
-        void await();
-
-		void swap(Co && co);
+        void await() { co::await(handle); }
+		void swap(Co && co) { std::swap(handle, co.handle); }
     };
-
-	template<int NICE>
-    template<typename Fn, typename... Args>
-    Co<NICE>::Co(Fn && fn, Args &&... args)
-    {
-        using Invoker = Invoker<Fn, Args...>;
-		auto [alloc_self, alloc_func] = get_invoker_alloc();
-		auto invoker_memory = alloc_func(alloc_self, sizeof(Invoker));
-		auto invoker = new (invoker_memory) Invoker(std::forward<Fn>(fn), std::forward<Args>(args)...);
-		invoker->allocator = alloc_self;
-		this->handle = create(invoker, NICE);
-        if (this->handle == nullptr)
-            throw CoCreateException();
-    }
-
-	template<int NICE>
-	Co<NICE>::~Co()
-	{
-		if (handle != nullptr)
-			co::destroy(handle);
-	}
-
-;	template<int NICE>
-	void Co<NICE>::await() { co::await(handle); }
-
-	template<int NICE>
-	void Co<NICE>::swap(Co<NICE> && co) { std::swap(handle, co.handle); }
-
-	template<int NICE>
-	Co<NICE>::Co(Co<NICE> && co) noexcept { swap(std::move(co)); }
 }

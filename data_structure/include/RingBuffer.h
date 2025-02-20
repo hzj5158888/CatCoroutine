@@ -46,30 +46,25 @@ public:
         return m_size == N;
     }
 
-    bool push(const T & x)
+    void push(const T & x)
     {
-        if (full())
-            return false;
-
+        assert(!full());
         m_data[rear++] = x;
         rear %= N;
         m_size++;
-        return true;
     }
 
-    bool push(T && x)
+    void push(T && x)
     {
-        if (full())
-            return false;
-
+        assert(!full());
         m_data[rear++] = std::move(x);
         rear %= N;
         m_size++;
-        return true;
     }
 
     T pop()
     {
+        assert(!empty());
         auto tmp = front++;
         front %= N;
         m_size--;

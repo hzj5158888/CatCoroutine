@@ -12,8 +12,6 @@
 #include "../allocator/include/MemoryPool.h"
 #include "../../sched/include/SchedulerDef.h"
 #include "../../sched/include/CfsSchedEntity.h"
-#include "../../data_structure/include/QueueLockFree.h"
-#include "../../allocator/include/PmrAllocator.h"
 
 enum CO_STATUS
 {

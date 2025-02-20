@@ -1,8 +1,8 @@
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
 #include <iostream>
 #include <mutex>
 #include <thread>

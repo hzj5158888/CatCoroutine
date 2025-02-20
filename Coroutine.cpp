@@ -1,6 +1,9 @@
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <memory>
+#include <random>
 #include <thread>
 #include <cstring>
 #include <memory_resource>
@@ -12,8 +15,10 @@
 #include "sched/include/Scheduler.h"
 #include "allocator/include/MemoryPool.h"
 
+#include "utils/include/co_utils.h"
 #include "utils/include/utils.h"
 #include "utils/include/tscns.h"
+#include "xor_shift_rand.h"
 
 namespace co_ctx {
 	bool is_init{false};
@@ -21,6 +26,7 @@ namespace co_ctx {
 	std::atomic<uint32_t> coroutine_count{co::MAIN_CO_ID};
 #ifdef __DEBUG_SCHED__
     std::unordered_set<Co_t*> co_vec{};
+    std::unordered_multiset<Co_t*> running_co{};
     spin_lock m_lock{};
 #endif
 	thread_local std::shared_ptr<local_t> loc{};
@@ -37,7 +43,7 @@ namespace co {
 	{
 		auto invoker = static_cast<InvokerBase*>(self);
 		invoker->operator()();
-		if (invoker->allocator == nullptr) [[unlikely]]
+		if (UNLIKELY(invoker->allocator == nullptr))
 		{
 			delete invoker;
 		} else {
@@ -49,7 +55,7 @@ namespace co {
 
 	std::pair<void *, void * (*)(void*, std::size_t)> get_invoker_alloc()
 	{
-		if (co_ctx::loc == nullptr) [[unlikely]]
+		if (UNLIKELY(co_ctx::loc == nullptr))
 			throw co::CoInitializationException();
 
 		return {
@@ -66,7 +72,7 @@ namespace co {
 		co_ctx::loc->scheduler = std::make_shared<Scheduler>();
 		co_ctx::loc->scheduler->this_thread_id = thread_idx;
 #ifdef __SCHED_CFS__
-		/* init local system clock calibrate thread */
+		/* init system clock calibrate thread */
 		auto clock_calibrate_fn = [](TSCNS * clock)
 		{
 			while (true)
@@ -76,14 +82,19 @@ namespace co {
 			}
 		};
 		co_ctx::loc->clock.init();
+		co_ctx::loc->clock.calibrate();
 		std::thread{clock_calibrate_fn, std::addressof(co_ctx::loc->clock)}.detach();
 #endif
+		/* init rand */
+		co_ctx::loc->rand = xor_shift_32_rand(co_ctx::loc->clock.rdns());
+		/* init scheduler */
 		co_ctx::manager->push_scheduler(co_ctx::loc->scheduler, thread_idx);
 		/* create scheduler loop context */
 		auto ctx = &co_ctx::loc->scheduler->sched_ctx;
 		auto start_ptr = get_member_func_addr<void(*)(void*)>(&Scheduler::start);
-		make_context(ctx, start_ptr, co_ctx::loc->scheduler.get());
-		co_ctx::loc->alloc.dyn_stk_pool.alloc_stk(ctx);
+        co_ctx::loc->alloc.dyn_stk_pool.alloc_stk(ctx);
+        ctx->arg_reg.di = reinterpret_cast<uint64_t>(co_ctx::loc->scheduler.get());
+		make_context(ctx, start_ptr);
 		if (thread_idx > 0)
 		{
 			co_ctx::manager->init_lock.wait_until_lockable();
@@ -119,17 +130,16 @@ namespace co {
 		co->sched.nice = PRIORITY_NORMAL;
 #endif
 		/* doesn't need to alloc stack */
-		/* just save context */
-        DASSERT((uint64_t)co > 1024 * 1024 * 1024);
-		int res = save_context(co->ctx.get_jmp_buf(), &co->ctx.first_full_save);
-		if (res == CONTEXT_RESTORE) // Restore Main Coroutine exec
-			return;
-
 		/* main coroutine doesn't need to up stack size */
+
+        /* set scheduler occupy_thread */
+        /* occupy thread of main coroutine must be this thread */
+        co->sched.occupy_thread = 0;
 		/* apply main coroutine */
 		co_ctx::manager->apply(co);
-		/* scheduler loop */
-		co_ctx::loc->scheduler->jump_to_sched();
+		/* goto scheduler */
+        auto scheduler = co_ctx::loc->scheduler.get();
+        swap_context(std::addressof(co->ctx), std::addressof(scheduler->sched_ctx));
 	}
 
     void destroy(void * handle)
@@ -137,15 +147,15 @@ namespace co {
 		auto co = static_cast<Co_t*>(handle);
 		/* 等待状态更新 */
 		co->status_lock.wait_until_lockable();
-		if (co->status != CO_DEAD) [[unlikely]]
+		if (UNLIKELY(co->status != CO_DEAD))
 			throw DestroyBeforeCloseException();
 
 		/* do not delete Main co */
-		if (co->id != MAIN_CO_ID) [[likely]]
+		if (LIKELY(co->id != MAIN_CO_ID))
 		{
 			auto alloc = co->allocator;
 			co->~Co_t();
-			if (alloc)
+			if (LIKELY(alloc != nullptr))
 #ifdef __MEM_PMR__
 				alloc->deallocate(co, sizeof(Co_t));
 #else
@@ -158,11 +168,11 @@ namespace co {
 
     void * create(void (*func)(void *), void * arg, int nice)
     {
-		if (!co_ctx::is_init) [[unlikely]]
+		if (UNLIKELY(!co_ctx::is_init))
 			return nullptr;
 
 		Co_t * co = static_cast<Co_t*>(co_ctx::loc->alloc.co_pool.allocate(sizeof(Co_t)));
-		if (co == nullptr) [[unlikely]]
+		if (UNLIKELY(co == nullptr))
 			return nullptr;
 
 		co = new (co) Co_t{}; // construct
@@ -171,8 +181,8 @@ namespace co {
 #ifdef __SCHED_CFS__
 		co->sched.nice = nice;
 #endif
-		make_context_wrap(&co->ctx, &wrap, func, arg);
-		// 由 scheduler 负责分配 stack
+        co->ctx.arg_reg.di = reinterpret_cast<uint64_t>(func);
+        co->ctx.arg_reg.si = reinterpret_cast<uint64_t>(arg);
 		co_ctx::manager->apply(co);
         return co;
     }
@@ -184,7 +194,7 @@ namespace co {
 
 	void await(void * handle)
 	{
-		if (handle == nullptr) [[unlikely]]
+		if (UNLIKELY(handle == nullptr))
 			throw Co_UnInitialization_Exception();
 
 		/* 获取 callee coroutine 状态锁 */
@@ -197,22 +207,6 @@ namespace co {
 			return;
 		}
 
-		/* 打断当前 Coroutine */
-		auto running_co = co_ctx::loc->scheduler->running_co;
-        DASSERT((uint64_t)running_co > 1024 * 1024 * 1024);
-		int res = save_context(running_co->ctx.get_jmp_buf(), &running_co->ctx.first_full_save);
-		if (res == CONTEXT_RESTORE)
-			return;
-
-#ifdef __STACK_STATIC__
-		/* update stack size after save context */
-		if (running_co->ctx.static_stk_pool != nullptr) [[likely]]
-			running_co->ctx.set_stk_size();
-#elif __STACK_DYN__
-		/* update stack size after save context */
-		running_co->ctx.set_stk_dyn_size();
-#endif
-
 		co_ctx::loc->scheduler->await_callee = callee;
 		co_ctx::loc->scheduler->jump_to_sched(CALL_AWAIT);
 	}
@@ -220,22 +214,6 @@ namespace co {
     void yield()
 	{
 		DASSERT(co_ctx::loc->scheduler->running_co != nullptr);
-
-		auto running_co = co_ctx::loc->scheduler->running_co;
-        DASSERT((uint64_t)running_co > 1024 * 1024 * 1024);
-		int res = save_context(running_co->ctx.get_jmp_buf(), &running_co->ctx.first_full_save);
-		if (res == CONTEXT_RESTORE)
-			return;
-
-#ifdef __STACK_STATIC__
-		/* update stack size after save context */
-		if (running_co->id != MAIN_CO_ID) [[likely]]
-			running_co->ctx.set_stk_size();
-#elif __STACK_DYN__
-		/* update stack size after save context */
-		running_co->ctx.set_stk_dyn_size();
-#endif
-
 		co_ctx::loc->scheduler->jump_to_sched(CALL_YIELD);
 	}
 }

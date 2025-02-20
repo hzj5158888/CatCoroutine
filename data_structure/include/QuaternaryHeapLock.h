@@ -1,21 +1,19 @@
 #pragma once
 
 #include <cstddef>
-#include <memory>
 #include <utility>
-#include <vector>
 #include <optional>
 
-#include "../../utils/include/spin_lock.h"
 #include "QuaternaryHeap.h"
+#include "spin_lock_sleep.h"
 
 template<typename T, typename CMP = std::less<T>>
-class QuaternaryHeapLock
+class alignas(__CACHE_LINE__) QuaternaryHeapLock
 {
 private:
     QuaternaryHeap<T, CMP> m_heap{};
     std::atomic<size_t> m_size{};
-    spin_lock m_lock{};
+    spin_lock_sleep m_lock{};
 public:
     QuaternaryHeapLock() = default;
 

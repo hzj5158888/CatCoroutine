@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <memory>
 #include <random>
+#include <chrono>
 
 #include "inplace_vector.h"
 

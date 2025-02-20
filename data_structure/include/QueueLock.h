@@ -12,8 +12,8 @@ class QueueLock
 {
 public:
     std::pmr::unsynchronized_pool_resource pool{get_default_pmr_opt()};
-    spin_lock m_lock{};
     std::pmr::deque<T> m_q{&pool};
+    spin_lock m_lock{};
 
     T wait_and_pop()
     {

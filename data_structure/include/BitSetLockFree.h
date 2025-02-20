@@ -106,7 +106,7 @@ private:
             break;
 		}
 
-		return ans;
+		return ans >= (long long)size() ? INVALID_INDEX : ans;
 	}
 public:
     constexpr static long long INVALID_INDEX = -1;
@@ -134,8 +134,10 @@ public:
 
     bool compare_set(size_t idx, bool expected, bool value, std::memory_order order = std::memory_order_seq_cst)
     {
-        auto pos = get_data_pos(idx);
+        if (idx >= size())
+            return false;
 
+        auto pos = get_data_pos(idx);
         bool ans = true;
         auto fn = [pos, expected, value, &ans](block_t cur) -> block_t
         {

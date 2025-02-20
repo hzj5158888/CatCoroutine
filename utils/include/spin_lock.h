@@ -31,6 +31,23 @@ public:
 		}
 	}
 
+    bool try_lock_for(int32_t max_spin)
+    {
+        auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
+        while (max_spin > 0)
+        {
+            // Optimistically assume the m_lock is free on the first try
+            if (!lock->exchange(true, std::memory_order_acquire))
+                return true;
+
+            // Wait for m_lock to be released without generating cache misses
+            while (max_spin > 0 && lock->load(std::memory_order_relaxed))
+                max_spin--;
+        }
+
+        return false;
+    }
+
 	bool try_lock() noexcept
 	{
 		auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);

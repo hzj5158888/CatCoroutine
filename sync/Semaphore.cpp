@@ -39,6 +39,6 @@ namespace co {
 
     int64_t sem_get_count(void * handle)
 	{
-		return static_cast<Sem_t*>(handle)->count;
+		return static_cast<Sem_t*>(handle)->count();
 	}
 }

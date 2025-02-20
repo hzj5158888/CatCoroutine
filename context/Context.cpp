@@ -13,31 +13,40 @@ void switch_context(Context * ctx, int ret)
     }
 }
 
-#if defined  __x86_64__
-void make_context_wrap(
-        Context * ctx,
-        void (*wrap)(void (*)(void*), void *),
-        void (*func)(void *),
-        void * arg)
+int swap_context(Context * from, Context * to, int ret)
 {
-    ctx->jmp_reg.bp = 0;
-    ctx->jmp_reg.sp = 0;
-    ctx->jmp_reg.ip = reinterpret_cast<uint64_t>(wrap);
+    assert(to->jmp_reg.sp != 0);
+    if (LIKELY(from != nullptr))
+        return swap_context_impl(std::addressof(from->jmp_reg.sp), std::addressof(to->jmp_reg.sp), ret);
 
-    ctx->arg_reg.di = reinterpret_cast<uint64_t>(func); // Arg1 func
-    ctx->arg_reg.si = reinterpret_cast<uint64_t>(arg); // Arg2 arg
+    return swap_context_impl((uint64_t*)std::addressof(from), std::addressof(to->jmp_reg.sp), ret);
 }
 
-void make_context(
-		Context * ctx,
-		void (*func)(void*),
-		void * arg)
+#if defined  __x86_64__
+void make_context_wrap(Context * ctx, void (*wrap)(void (*)(void*), void *))
 {
-	ctx->jmp_reg.bp = 0;
-	ctx->jmp_reg.sp = 0;
-	ctx->jmp_reg.ip = reinterpret_cast<uint64_t>(func);
 
-	ctx->arg_reg.di = reinterpret_cast<uint64_t>(arg);
+    ctx->jmp_reg.sp -= Context::JMP_REG::REG_COUNT * sizeof(uint64_t);
+
+    auto stk = reinterpret_cast<uint64_t*>(ctx->jmp_reg.sp);
+    stk[Context::JMP_REG::X87CW] = ~static_cast<uint64_t>(0); // mark for first swap
+    stk[Context::JMP_REG::SI] = ctx->arg_reg.si; // rsi
+    stk[Context::JMP_REG::DI] = ctx->arg_reg.di; // rdi
+    stk[Context::JMP_REG::BP] = ctx->jmp_reg.bp; // rbp
+    stk[Context::JMP_REG::IP] = reinterpret_cast<uint64_t>(wrap); // rip
+    ctx->first_full_save = false;
+}
+
+void make_context(Context * ctx, void (*func)(void*))
+{
+    ctx->jmp_reg.sp -= Context::JMP_REG::REG_COUNT * sizeof(uint64_t);
+
+    auto stk = reinterpret_cast<uint64_t*>(ctx->jmp_reg.sp);
+    stk[Context::JMP_REG::X87CW] = ~static_cast<uint64_t>(0); // mark for first swap
+    stk[Context::JMP_REG::DI] = ctx->arg_reg.di; // rdi
+    stk[Context::JMP_REG::BP] = ctx->jmp_reg.bp; // rbp
+    stk[Context::JMP_REG::IP] = reinterpret_cast<uint64_t>(func); // rip
+    ctx->first_full_save = false;
 }
 
 #else

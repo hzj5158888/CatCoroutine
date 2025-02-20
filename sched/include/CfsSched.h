@@ -3,8 +3,6 @@
 //
 #pragma once
 
-#include "SchedulerDef.h"
-
 // 防止头文件循环引用
 
 namespace co {

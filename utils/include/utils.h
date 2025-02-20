@@ -110,17 +110,51 @@ inline constexpr std::pmr::pool_options get_default_pmr_opt()
     };
 }
 
-inline void spin_wait(uint32_t spin_count)
+inline void spin_wait(int32_t total_spin)
 {
-    while (spin_count--) { __builtin_ia32_pause(); }
+    while (total_spin--) { __builtin_ia32_pause(); }
+}
+
+template<typename T>
+inline constexpr bool is_pow_of_2(T x)
+{
+    static_assert(std::is_unsigned_v<T>);
+    return (x & (x - 1)) == 0;
+}
+
+inline uint32_t xorshift32(uint32_t state)
+{
+	/* Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs" */
+	state ^= state << 13;
+	state ^= state >> 17;
+	state ^= state << 5;
+	return state;
 }
 
 template<typename Fn>
-inline bool spin_wait(int32_t spin_count, Fn && fn)
+inline int32_t spin_wait(int32_t total_spin, Fn && fn)
 {
-    static_assert(std::is_invocable_r_v<bool, Fn>);
+    if constexpr (std::is_invocable_r_v<bool, Fn>)
+    {
+        for (int32_t i = 0; i < total_spin; i++)
+        {
+            if (fn())
+                return i;
 
-    bool ans{false};
-    while (spin_count-- > 0 && !(ans = fn())) { __builtin_ia32_pause(); }
-    return ans;
+            __builtin_ia32_pause();
+        }
+    } else if constexpr (std::is_invocable_r_v<bool, Fn, int32_t>)
+    {
+        for (int32_t i = 0; i < total_spin; i++)
+        {
+            if (fn(i))
+                return i;
+
+            __builtin_ia32_pause();
+        }
+    } else {
+        static_assert(false);
+    }
+
+    return -1;
 }

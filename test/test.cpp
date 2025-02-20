@@ -201,7 +201,7 @@ void channel_test()
 {
     std::ios::sync_with_stdio(false);
 
-    using chan_t = co::Channel<int, 128>;
+    using chan_t = co::Channel<int, 2048>;
 
     std::atomic<int> d_print_count{};
     std::array<std::atomic<int>, 2000> count;
@@ -217,13 +217,14 @@ void channel_test()
                 chan.push(i);
                 count[i]++;
             } else {
-                int res = chan.pull();
+                int res{};
+                chan.pull(res);
                 count[res]--;
             }
             co::yield();
         }
 
-        if ((++d_print_count) % 2048 == 0)
+        if ((++d_print_count) % 40960 == 0)
         {
             std::string s = "coroutine end, " + std::to_string(co_idx);
             std::cout << s << std::endl;
