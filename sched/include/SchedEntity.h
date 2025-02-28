@@ -5,20 +5,22 @@
 
 #include "../../utils/include/utils.h"
 
-class SchedEntity
-{
-public:
-	bool can_migration{true};
-	int occupy_thread{-1};
+namespace co {
+    class SchedEntity {
+    public:
+        bool can_migration{true};
+        int occupy_thread{-1};
 
-	virtual ~SchedEntity() = default;
-	SchedEntity() 
-	{ 
+        virtual ~SchedEntity() = default;
+
+        SchedEntity() {
 #ifdef __STACK_STATIC__
-		can_migration = false;
+            can_migration = false;
 #endif
-	}
+        }
 
-	virtual void start_exec() {}
-    virtual void end_exec() {}
-};
+        virtual void start_exec() {}
+
+        virtual void end_exec() {}
+    };
+}

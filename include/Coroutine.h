@@ -16,7 +16,7 @@ namespace co {
 	constexpr static uint64_t STATIC_STK_NUM = 256;
 	static_assert(CPU_CORE > 0);
 
-	class Co_UnInitialization_Exception : public std::exception
+	class CoUnInitializationException : public std::exception
 	{
 	public:
 		[[nodiscard]] const char * what() const noexcept override { return "Co UnInitialization"; }
@@ -45,6 +45,8 @@ namespace co {
     void destroy(void * handle);
 	void await(void * handle);
     void yield();
+    void sleep(std::chrono::microseconds duration);
+    void sleep_until(std::chrono::microseconds end_time);
 	void init();
 
 	template<int NICE = PRIORITY_NORMAL>
@@ -60,6 +62,8 @@ namespace co {
 		template<typename Fn, typename ... Args>
         explicit Co(Fn && fn, Args &&... args)
 		{
+            static_assert(std::is_invocable_v<Fn, Args...>);
+
 			using Invoker = Invoker<Fn, Args...>;
 			auto [alloc_self, alloc_func] = get_invoker_alloc();
 			auto invoker_memory = alloc_func(alloc_self, sizeof(Invoker));

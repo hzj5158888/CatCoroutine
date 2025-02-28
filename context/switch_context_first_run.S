@@ -9,3 +9,6 @@ switch_context_first_full_save:
     mov %rsi,%rdi
     mov %rdx,%rsi
 	jmp *%r12
+
+.section .note.GNU-stack,"",%progbits
+

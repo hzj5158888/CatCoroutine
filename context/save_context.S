@@ -1,4 +1,3 @@
-.file "save_context.S"
 .text
 .global save_context
 .type save_context, @function

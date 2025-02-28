@@ -3,6 +3,8 @@
 //
 
 #pragma once
-struct StackInfo;
 
-struct StackPool;
+namespace co {
+    struct StackInfo;
+    struct StackPool;
+}

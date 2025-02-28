@@ -13,66 +13,72 @@
 #include "../../sched/include/SchedulerDef.h"
 #include "../../sched/include/CfsSchedEntity.h"
 
-enum CO_STATUS
-{
-    CO_NEW = 1,
-    CO_READY,
-    CO_RUNNING,
-	CO_INTERRUPT,
-    CO_WAITING,
-	CO_DEAD
-};
+namespace co {
+    enum CO_STATUS {
+        CO_NEW = 1,
+        CO_READY,
+        CO_RUNNING,
+        CO_INTERRUPT,
+        CO_WAITING,
+        CO_DEAD
+    };
 
-struct Co_t
-{
-    uint32_t id{co::INVALID_CO_ID};
-    std::atomic<uint8_t> status{CO_NEW};
+    enum CO_WAKEUP_REASON {
+        CO_WAKEUP_NONE = 0,
+        CO_WAKEUP_TIMER
+    };
 
-	// 状态锁
-	spin_lock status_lock{};
+    struct Co_t {
+        uint32_t id{co::INVALID_CO_ID};
+        std::atomic<uint8_t> status{CO_NEW};
+        spin_lock status_lock{};
+        uint16_t wakeup_reason{};
 
-	// 分配器信息
-#ifdef __MEM_PMR__
-	std::pmr::synchronized_pool_resource * allocator{};
-#else
-	MemoryPool * allocator{};
-#endif
-
-    // 上下文
-    Context ctx{};
-	// 栈是否活跃
-	spin_lock stk_active_lock{};
-
-	// await
-	Co_t * await_callee{}; // await 谁
-    spin_lock await_caller_lock{};
-    std::queue<Co_t*> await_caller{}; // 谁 await
-#ifdef __DEBUG__
-    void * sem_ptr{};
-#endif
-
-    // 调度信息
+        // 调度信息
 #ifdef __SCHED_CFS__
-	alignas(__CACHE_LINE__) CfsSchedEntity sched{};
+        CfsSchedEntity sched{};
 #elif __SCHED_FIFO__
-    alignas(__CACHE_LINE__) SchedEntity sched{};
+        SchedEntity sched{};
 #endif
-	Scheduler * scheduler{};
+        Scheduler * scheduler{};
 
-	Co_t() = default;
-	Co_t(const Co_t & oth) = delete;
-	Co_t(Co_t && oth) = delete;
-	~Co_t() = default;
+        /* timer waiting_task */
+        std::shared_ptr<TimerTask> waiting_task{};
+
+        /* 用于通道唤醒后接收数据
+         */
+        void * chan_receiver{};
+        bool chan_has_value{};
+
+        // 上下文
+        Context ctx{};
+        spin_lock stk_active_lock{}; // 栈是否活跃
+
+        // 分配器信息
+#ifdef __MEM_PMR__
+        std::pmr::synchronized_pool_resource * allocator{};
+#else
+        MemoryPool *allocator{};
+#endif
+
+        // await
+        Co_t *await_callee{}; // await 谁
+        spin_lock await_caller_lock{};
+        std::queue<Co_t *> await_caller{}; // 谁 await
+#ifdef __DEBUG__
+        void * sem_ptr{};
+#endif
+
+        Co_t() = default;
+        Co_t(const Co_t &oth) = delete;
+        Co_t(Co_t &&oth) = delete;
+        ~Co_t() = default;
 
 #ifdef __SCHED_CFS__
-	bool operator > (const Co_t & oth) const;
-	bool operator < (const Co_t & oth) const;
+        bool operator>(const Co_t &oth) const;
+        bool operator<(const Co_t &oth) const;
 #endif
-	void operator delete (void * ptr) noexcept = delete;
-};
 
-template<>
-struct std::hash<Co_t>
-{
-	std::size_t operator() (const Co_t & oth) const noexcept { return oth.id; }
-};
+        void operator delete(void *ptr) noexcept = delete;
+    };
+}

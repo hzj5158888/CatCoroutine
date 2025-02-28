@@ -24,7 +24,7 @@ swap_context_impl:
 .switch:
     mov %rcx, %rsp
 .fpu:
-    cmp $0xffffffffffffffff, (%rsp)  /* -1 => first time swap */
+    cmpq $0xffffffffffffffff, (%rsp)  /* -1 => first time swap */
     je .general /* skip fpu */
     fldcw (%rsp)
     ldmxcsr 0x8(%rsp)

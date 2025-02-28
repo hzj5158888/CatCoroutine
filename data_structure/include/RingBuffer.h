@@ -8,126 +8,107 @@
 #include <utility>
 #include <array>
 #include <cassert>
+#include <vector>
 
-template<typename T, std::size_t N>
-class RingBuffer
-{
-private:
+namespace co {
+    template<typename T, std::size_t N, typename Allocator = std::allocator<T>>
+    class RingBuffer {
+    private:
+        T * m_data{};
+        std::size_t m_size{};
+        std::size_t rear{}, front{};
+        static_assert(N > 0);
 
-    std::size_t m_size{};
-    std::size_t rear{}, front{};
-    std::array<T, N> m_data;
+        constexpr size_t mod_idx(size_t idx)
+        {
+            if constexpr (is_pow_of_2(N))
+                return idx & (N - 1);
+            else
+                return idx % N;
+        }
 
-    static_assert(N > 0);
-public:
-    RingBuffer() = default;
-	RingBuffer(RingBuffer && buf) noexcept { swap(std::move(buf)); }
+    public:
+        RingBuffer() { m_data = Allocator{}.allocate(sizeof(T) * N); };
 
-	void swap(RingBuffer && buf)
-	{
-		std::swap(m_data, buf.m_data);
-		std::swap(rear, buf.rear);
-		std::swap(front, buf.front);
-		std::swap(m_size, buf.m_size);
-	}
+        RingBuffer(RingBuffer && buf) noexcept { swap(std::move(buf)); }
 
-    [[nodiscard]] bool empty() const
-    {
-        return m_size == 0;
-    }
+        ~RingBuffer()
+        {
+            if constexpr (!std::is_trivially_destructible_v<T>)
+            {
+                for (; m_size > 0; m_size--)
+                {
+                    m_data[front].~T();
+                    front = mod_idx(front + 1);
+                }
+            }
 
-    [[nodiscard]] std::size_t size() const
-    {
-        return m_size;
-    }
+            Allocator{}.deallocate(m_data, sizeof(T) * N);
+        }
 
-    [[nodiscard]] bool full() const
-    {
-        return m_size == N;
-    }
+        void swap(RingBuffer && buf)
+        {
+            std::swap(m_data, buf.m_data);
+            std::swap(rear, buf.rear);
+            std::swap(front, buf.front);
+            std::swap(m_size, buf.m_size);
+        }
 
-    void push(const T & x)
-    {
-        assert(!full());
-        m_data[rear++] = x;
-        rear %= N;
-        m_size++;
-    }
+        [[nodiscard]] bool empty() const
+        {
+            return m_size == 0;
+        }
 
-    void push(T && x)
-    {
-        assert(!full());
-        m_data[rear++] = std::move(x);
-        rear %= N;
-        m_size++;
-    }
+        [[nodiscard]] std::size_t size() const
+        {
+            return m_size;
+        }
 
-    T pop()
-    {
-        assert(!empty());
-        auto tmp = front++;
-        front %= N;
-        m_size--;
-        return m_data[tmp];
-    }
-};
+        [[nodiscard]] bool full() const
+        {
+            return m_size == N;
+        }
 
-template<typename T>
-class RingBufferDyn
-{
-private:
-	std::size_t N;
-	std::size_t m_size{};
-	std::size_t rear{}, front{};
-	std::vector<T> m_data;
-public:
-	explicit RingBufferDyn(std::size_t n) : N(n) { assert(n > 0); m_data.resize(n); };
+        template<class V>
+        bool push(V && x)
+        {
+            if (UNLIKELY(full()))
+                return false;
 
-	[[nodiscard]] bool empty() const
-	{
-		return m_size == 0;
-	}
+            m_data[rear++] = std::forward<V>(x);
+            rear = mod_idx(rear);
+            m_size++;
+            return true;
+        }
 
-	[[nodiscard]] std::size_t size() const
-	{
-		return m_size;
-	}
+        template<class ... Args>
+        bool emplace(Args &&... args)
+        {
+            if (UNLIKELY(full()))
+                return false;
 
-	[[nodiscard]] bool full() const
-	{
-		return m_size == N;
-	}
+            new (std::addressof(m_data[rear++])) T{std::forward<Args>(args)...};
+            rear = mod_idx(rear);
+            m_size++;
+            return true;
+        }
 
-	bool push(const T & x)
-	{
-		if (full())
-			return false;
+        bool pop(T & ans)
+        {
+            if (UNLIKELY(empty()))
+                return false;
 
-		m_data[rear++] = x;
-		rear %= N;
-		m_size++;
-		return true;
-	}
+            auto tmp = front++;
+            front = mod_idx(front);
+            ans = std::move(m_data[tmp]);
+            if constexpr (!std::is_trivially_destructible_v<T>)
+                m_data[tmp].~T();
 
-	bool push(T && x)
-	{
-		if (full())
-			return false;
-
-		m_data[rear++] = std::move(x);
-		rear %= N;
-		m_size++;
-		return true;
-	}
-
-	T && pop()
-	{
-		assert(!empty());
-		auto tmp = front++;
-		front %= N;
-		return std::move(m_data[tmp]);
-	}
-};
+            m_size--;
+            return true;
+        }
+    };
+}
 
 
 #endif //COROUTINE_RINGBUFFER_H

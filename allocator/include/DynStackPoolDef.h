@@ -5,6 +5,8 @@
 #ifndef DYNSTACKPOOLDEF_H
 #define DYNSTACKPOOLDEF_H
 
-class DynStackPool;
+namespace co {
+    class DynStackPool;
+}
 
 #endif //DYNSTACKPOOLDEF_H

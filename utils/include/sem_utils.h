@@ -15,85 +15,86 @@
 
 #include "utils.h"
 
-class CountingSemCreateException : public std::exception {
-public:
-  [[nodiscard]] const char *what() const noexcept override {
-    return "counting_sem construct failed";
-  }
-};
+namespace co {
+    class CountingSemCreateException : public std::exception {
+    public:
+        [[nodiscard]] const char *what() const noexcept override {
+            return "counting_sem construct failed";
+        }
+    };
 
-class CountingSemModifyException : public std::exception 
-{
-public:
-    int err_code{};
+    class CountingSemModifyException : public std::exception {
+    public:
+        int err_code{};
 
-    explicit CountingSemModifyException(int code) : err_code(code) {}
+        explicit CountingSemModifyException(int code) : err_code(code) {}
 
-    [[nodiscard]] const char * what() const noexcept override 
-    {
-        return "counting_sem Modify failed";
+        [[nodiscard]] const char *what() const noexcept override {
+            return "counting_sem Modify failed";
+        }
+    };
+
+    class counting_semaphore {
+    private:
+        sem_t sem{};
+    public:
+        explicit inline counting_semaphore(uint32_t count = 0);
+
+        ~counting_semaphore();
+
+        inline void wait();
+
+        inline void signal();
+
+        inline void signal(uint32_t count);
+
+        inline bool try_wait();
+
+        inline int count();
+    };
+
+    counting_semaphore::counting_semaphore(uint32_t count) {
+        int res = sem_init(&sem, 0, count);
+        if (UNLIKELY(res != 0))
+            throw CountingSemCreateException();
     }
-};
 
-class counting_semaphore {
-private:
-  sem_t sem{};
-public:
-  explicit inline counting_semaphore(uint32_t count = 0);
-  ~counting_semaphore();
-  inline void wait();
-  inline void signal();
-  inline void signal(uint32_t count);
-  inline bool try_wait();
-  inline int count();
-};
+    inline counting_semaphore::~counting_semaphore() { sem_destroy(&sem); }
 
-counting_semaphore::counting_semaphore(uint32_t count) {
-  int res = sem_init(&sem, 0, count);
-    if (UNLIKELY(res != 0))
-    throw CountingSemCreateException();
-}
+    inline void counting_semaphore::wait() {
+        int res = sem_wait(&sem);
+        if (UNLIKELY(res != 0))
+            throw CountingSemModifyException(errno);
+    }
 
-inline counting_semaphore::~counting_semaphore() { sem_destroy(&sem); }
+    inline void counting_semaphore::signal() {
+        int res = sem_post(&sem);
+        if (UNLIKELY(res != 0))
+            throw CountingSemModifyException(errno);
+    }
 
-inline void counting_semaphore::wait() 
-{ 
-    int res = sem_wait(&sem);
-    if (UNLIKELY(res != 0))
-      throw CountingSemModifyException(errno);
-}
+    inline void counting_semaphore::signal(uint32_t count) {
+        for (; count > 0; count--)
+            signal();
+    }
 
-inline void counting_semaphore::signal() 
-{ 
-    int res = sem_post(&sem);
-    if (UNLIKELY(res != 0))
-      throw CountingSemModifyException(errno);
-}
+    inline bool counting_semaphore::try_wait() {
+        int err = 0;
+        int res = sem_trywait(&sem);
+        if (LIKELY(res == 0))
+            return true;
+        else if ((err = errno) == EAGAIN)
+            return false;
+        else
+            throw CountingSemModifyException(err);
+    }
 
-inline void counting_semaphore::signal(uint32_t count) 
-{ 
-    for (; count > 0; count--)
-      signal();
-}
-
-inline bool counting_semaphore::try_wait()
-{
-    int err = 0;
-    int res = sem_trywait(&sem);
-    if (LIKELY(res == 0))
-        return true;
-    else if ((err = errno) == EAGAIN)
-        return false;
-    else
-        throw CountingSemModifyException(err);
-}
-
-inline int counting_semaphore::count()
-{
-    int ans{}, err{};
-    int res = sem_getvalue(&sem, &ans);
-    if (LIKELY(res == 0))
-      return ans;
-    else
-      throw CountingSemModifyException((err = errno));
+    inline int counting_semaphore::count() {
+        int ans{}, err{};
+        int res = sem_getvalue(&sem, &ans);
+        if (LIKELY(res == 0))
+            return ans;
+        else
+            throw CountingSemModifyException((err = errno));
+    }
 }

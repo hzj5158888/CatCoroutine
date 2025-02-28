@@ -60,7 +60,7 @@ void list_free_test()
 
 void queue_lock_free_test()
 {
-    QueueLockFree<int> q;
+    co::QueueLockFree<int> q;
     constexpr int data_count = 10000000;
     auto push_elem = [&q]()
     {
@@ -68,7 +68,7 @@ void queue_lock_free_test()
             q.push(i);
     };
 
-    spin_lock m_lock{};
+    co::spin_lock m_lock{};
     std::vector<int> res{};
     auto pull_elem = [&q, &res, &m_lock]()
     {
@@ -119,9 +119,9 @@ void bitset_test()
 
 	constexpr auto bits = 409600;
 
-	BitSetLockFree<bits> bs;
+	co::BitSetLockFree<bits> bs;
 	std::vector<int> idx;
-	spin_lock m_lock{};
+	co::spin_lock m_lock{};
 	std::vector<std::thread> ts;
 	std::atomic<int> push_idx{};
 	auto push = [&idx, &m_lock, &bs, &push_idx]()
@@ -146,7 +146,7 @@ void bitset_test()
 	ts.clear();
 	std::sort(idx.begin(), idx.end());
 
-	for (auto i : idx)
+	for ([[maybe_unused]] size_t i : idx)
 		assert(bs.get(i));
 
 	std::cout << idx.size() << std::endl;
@@ -157,7 +157,7 @@ void bitset_test()
 		while (true) 
 		{
 			auto cur = bs.change_first_expect(true, false);
-			if (cur == BitSetLockFree<>::INVALID_INDEX)
+			if (cur == co::BitSetLockFree<>::INVALID_INDEX)
 				break;
 			
 			std::lock_guard lock(m_lock);

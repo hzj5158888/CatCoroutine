@@ -4,4 +4,6 @@
 
 #pragma once
 
-struct Co_t;
+namespace co {
+    struct Co_t;
+}

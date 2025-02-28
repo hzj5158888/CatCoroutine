@@ -18,19 +18,8 @@
 #include "utils/include/co_utils.h"
 #include "utils/include/utils.h"
 #include "utils/include/tscns.h"
+#include "../timer/include/Timer.h"
 #include "xor_shift_rand.h"
-
-namespace co_ctx {
-	bool is_init{false};
-	std::shared_ptr<SchedManager> manager{};
-	std::atomic<uint32_t> coroutine_count{co::MAIN_CO_ID};
-#ifdef __DEBUG_SCHED__
-    std::unordered_set<Co_t*> co_vec{};
-    std::unordered_multiset<Co_t*> running_co{};
-    spin_lock m_lock{};
-#endif
-	thread_local std::shared_ptr<local_t> loc{};
-}
 
 namespace co {
 	void wrap(void (*func)(void*), void * arg)
@@ -60,40 +49,68 @@ namespace co {
 
 		return {
 			&co_ctx::loc->alloc.invoker_pool,
-			get_member_func_addr<void * (*)(void*, std::size_t)>(&MemoryPool::allocate)
+			get_member_func_addr<MemoryPool, void * (*)(void*, std::size_t)>(&MemoryPool::allocate)
 		};
 	}
 
 	void init_other(int thread_idx)
 	{
-		/* init other thread */
+		/* init thread local */
 		co_ctx::loc = std::make_shared<local_t>();
-		co_ctx::loc->thread_id = std::this_thread::get_id();
-		co_ctx::loc->scheduler = std::make_shared<Scheduler>();
-		co_ctx::loc->scheduler->this_thread_id = thread_idx;
+        co_ctx::loc->thread_id = std::this_thread::get_id();
+        co_ctx::loc->timer = std::make_shared<Timer>();
 #ifdef __SCHED_CFS__
-		/* init system clock calibrate thread */
-		auto clock_calibrate_fn = [](TSCNS * clock)
+		/* init system clock tick thread */
+		auto clock_tick_fn = [](const std::shared_ptr<local_t> & loc)
 		{
+            /* set local_t to main thread local_t */
+            co_ctx::loc = loc;
+
+            std::chrono::microseconds accumulate{};
+            auto timer_interval = Timer::TickInterval;
+            auto clock_interval = std::chrono::seconds(1);
 			while (true)
 			{
-				clock->calibrate();
-				std::this_thread::sleep_for(std::chrono::seconds(1));
+                if (UNLIKELY(accumulate >= clock_interval))
+                {
+                    loc->clock.calibrate();
+                    accumulate = microseconds{};
+                }
+
+                loc->timer->tick();
+                accumulate += timer_interval;
+				std::this_thread::sleep_for(timer_interval);
 			}
 		};
 		co_ctx::loc->clock.init();
 		co_ctx::loc->clock.calibrate();
-		std::thread{clock_calibrate_fn, std::addressof(co_ctx::loc->clock)}.detach();
+		std::thread{clock_tick_fn, co_ctx::loc}.detach();
 #endif
 		/* init rand */
 		co_ctx::loc->rand = xor_shift_32_rand(co_ctx::loc->clock.rdns());
-		/* init scheduler */
+		/* init scheduler and alloc memory */
+        Context sched_ctx{};
+        co_ctx::loc->alloc.dyn_stk_pool.alloc_stk(std::addressof(sched_ctx));
+        /* set scheduler and scheduler context memory */
+        /* ctx_bp % 16 == 8 */
+        size_t ctx_bp = sched_ctx.jmp_reg.bp;
+        size_t mask = static_cast<size_t>(-1) - (64 - 1);
+        ctx_bp = (ctx_bp & mask) - sizeof(Scheduler);
+        auto * scheduler_ptr = reinterpret_cast<Scheduler*>(ctx_bp);
+        /* set scheduler context memory */
+        ctx_bp = align_stk_ptr(ctx_bp);
+        sched_ctx.jmp_reg.bp = ctx_bp;
+        sched_ctx.jmp_reg.sp = ctx_bp;
+        /* init scheduler */
+        scheduler_ptr = new (scheduler_ptr) Scheduler();
+        scheduler_ptr->sched_ctx = sched_ctx;
+        co_ctx::loc->scheduler = scheduler_ptr;
+        co_ctx::loc->scheduler->this_thread_id = thread_idx;
 		co_ctx::manager->push_scheduler(co_ctx::loc->scheduler, thread_idx);
-		/* create scheduler loop context */
+		/* init scheduler context */
 		auto ctx = &co_ctx::loc->scheduler->sched_ctx;
-		auto start_ptr = get_member_func_addr<void(*)(void*)>(&Scheduler::start);
-        co_ctx::loc->alloc.dyn_stk_pool.alloc_stk(ctx);
-        ctx->arg_reg.di = reinterpret_cast<uint64_t>(co_ctx::loc->scheduler.get());
+		auto start_ptr = get_member_func_addr<Scheduler, void(*)(void*)>(&Scheduler::start);
+        ctx->arg_reg.di = reinterpret_cast<uint64_t>(co_ctx::loc->scheduler);
 		make_context(ctx, start_ptr);
 		if (thread_idx > 0)
 		{
@@ -104,6 +121,8 @@ namespace co {
 
 	void init()
 	{
+        /* init global allocator */
+        co_ctx::g_alloc = std::make_shared<GlobalAllocatorGroup>();
 		/* currency is main thread */
 		/* init scheduler manager */
 		co_ctx::manager = std::make_shared<SchedManager>(CPU_CORE);
@@ -115,7 +134,7 @@ namespace co {
 		for (int i = 0; i < CPU_CORE - 1; i++)
 			std::thread{init_other, i + 1}.detach();
 
-		/* wait for init finish */
+		/* wait_then for init finish */
 		co_ctx::manager->init_lock.wait_until_lockable();
 
 		/* init finished */
@@ -138,7 +157,7 @@ namespace co {
 		/* apply main coroutine */
 		co_ctx::manager->apply(co);
 		/* goto scheduler */
-        auto scheduler = co_ctx::loc->scheduler.get();
+        auto scheduler = co_ctx::loc->scheduler;
         swap_context(std::addressof(co->ctx), std::addressof(scheduler->sched_ctx));
 	}
 
@@ -195,7 +214,7 @@ namespace co {
 	void await(void * handle)
 	{
 		if (UNLIKELY(handle == nullptr))
-			throw Co_UnInitialization_Exception();
+			throw CoUnInitializationException();
 
 		/* 获取 callee coroutine 状态锁 */
 		auto callee = static_cast<Co_t*>(handle);
@@ -207,7 +226,7 @@ namespace co {
 			return;
 		}
 
-		co_ctx::loc->scheduler->await_callee = callee;
+        co_ctx::loc->scheduler->await_callee = callee;
 		co_ctx::loc->scheduler->jump_to_sched(CALL_AWAIT);
 	}
 
@@ -216,4 +235,18 @@ namespace co {
 		DASSERT(co_ctx::loc->scheduler->running_co != nullptr);
 		co_ctx::loc->scheduler->jump_to_sched(CALL_YIELD);
 	}
+
+    void sleep(std::chrono::microseconds duration)
+    {
+        auto loc = co_ctx::loc.get();
+        loc->scheduler->sleep_args.sleep_duration = duration;
+        loc->scheduler->jump_to_sched(CALL_SLEEP);
+    }
+
+    void sleep_until(std::chrono::microseconds until)
+    {
+        auto loc = co_ctx::loc.get();
+        loc->scheduler->sleep_args.sleep_until = until;
+        loc->scheduler->jump_to_sched(CALL_SLEEP);
+    }
 }

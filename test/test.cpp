@@ -88,7 +88,7 @@ void single_switch_test()
 
 void multiple_switch_test()
 {
-	std::ios::sync_with_stdio(false);
+	//std::ios::sync_with_stdio(false);
 	auto work_loop = [] (std::atomic<int> & g_count)
 	{
 		constexpr auto print_round = 2000;
@@ -97,7 +97,7 @@ void multiple_switch_test()
 			//std::cout << g_count;
 			//std::cout << "\n";
 
-			g_count.fetch_add(1, std::memory_order_seq_cst);
+			g_count++;
 			co::yield();
 		}
 	};
@@ -110,8 +110,8 @@ void multiple_switch_test()
 	std::cout << "multiple coroutine switch test" << std::endl;
 
     constexpr auto coroutine_cnt = 500000;
-    std::atomic<int> g_count{};
-	std::vector<co_pair> vec{};
+    alignas(__CACHE_LINE__)  std::atomic<int> g_count{};
+    std::vector<co_pair> vec{};
 	vec.reserve(coroutine_cnt / 2);
 	start_cal();
 	for (int i = 0; i < coroutine_cnt / 2; i++)
@@ -137,7 +137,7 @@ void multiple_switch_test()
 
 void semaphore_test()
 {
-    std::ios::sync_with_stdio(false);
+    //std::ios::sync_with_stdio(false);
 
     auto work_loop = [] (co::Semaphore & x, co::Semaphore & y, int flag)
     {
@@ -199,9 +199,9 @@ void semaphore_test()
 
 void channel_test()
 {
-    std::ios::sync_with_stdio(false);
+    //std::ios::sync_with_stdio(false);
 
-    using chan_t = co::Channel<int, 2048>;
+    using chan_t = co::Channel<int, 128>;
 
     std::atomic<int> d_print_count{};
     std::array<std::atomic<int>, 2000> count;
@@ -214,11 +214,11 @@ void channel_test()
             //std::cout << "\n";
             if (flag)
             {
-                chan.push(i);
+                chan << i;
                 count[i]++;
             } else {
                 int res{};
-                chan.pull(res);
+                chan >> res;
                 count[res]--;
             }
             co::yield();
@@ -268,11 +268,59 @@ void channel_test()
     end_of_test();
 }
 
+void sleep_test()
+{
+    std::cout << "coroutine sleep test" << std::endl;
+
+    using namespace std::chrono;
+
+    constexpr auto test_round = 100;
+    std::atomic<int> d_print_count{};
+    std::atomic<uint64_t> delta_sum{};
+    auto func = [&delta_sum, &d_print_count](int co_id)
+    {
+        constexpr microseconds sleep_time = milliseconds(50);
+        microseconds prev = microseconds(co::co_ctx::loc->clock.rdus()) - sleep_time;
+        for (int i = 0; i < test_round; i++)
+        {
+            microseconds now = microseconds(co::co_ctx::loc->clock.rdus());
+
+            //std::string str =
+                   // "sleep, co_id = " + std::to_string(co_id)
+                    //+ ", round = " + std::to_string(i)
+                    //+ ", delta = " + std::to_string((now - prev).count());
+
+            //std::cout << str << std::endl;
+            delta_sum += (now - prev).count();
+            prev = now;
+            co::sleep(sleep_time);
+        }
+
+        if ((++d_print_count) % 160 == 0)
+        {
+            std::string s = "coroutine end, " + std::to_string(co_id);
+            std::cout << s << std::endl;
+        }
+    };
+
+    constexpr auto coroutine_cnt = 500;
+    std::vector<co::Co<co::PRIORITY_NORMAL>> vec{};
+    for (int i = 0; i < coroutine_cnt; i++)
+        vec.emplace_back(func, i);
+
+    for (auto & v : vec)
+        v.await();
+
+    std::cout << "average delta time(us) = " << (delta_sum / (coroutine_cnt * test_round)) << std::endl;
+    std::cout << "coroutine sleep test end" << std::endl;
+}
+
 void test()
 {
 	//basic_test();
-    //single_switch_test();
+    single_switch_test();
     //multiple_switch_test();
     //semaphore_test();
-    channel_test();
+    //channel_test();
+    //sleep_test();
 }

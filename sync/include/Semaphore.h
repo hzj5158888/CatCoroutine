@@ -7,16 +7,12 @@
 #include <cstdint>
 #include <memory>
 
-#include "CoPrivate.h"
-#include "MemoryPool.h"
+#include "Sem_t.h"
 
 namespace co {
-	void * sem_create(uint32_t count);
+    void sem_construct(Sem_t * ptr, uint32_t count);
+	Sem_t * sem_create(uint32_t count);
 	void sem_destroy(void * handle);
-	void sem_wait(void * handle);
-	bool sem_try_wait(void * handle);
-	void sem_signal(void * handle);
-    int64_t sem_get_count(void * handle);
 
 	class SemaphoreCreateException : public std::exception
 	{
@@ -37,7 +33,7 @@ namespace co {
 	class Semaphore
 	{
 	private:
-        void * handle{};
+        Sem_t * handle{};
 	public:
 		inline Semaphore();
 		inline explicit Semaphore(uint32_t x);
@@ -48,14 +44,16 @@ namespace co {
 		inline void signal();
 		inline void wait();
 		inline bool try_wait();
+        inline void wait_then(const std::function<void(Co_t*)> &);
 		inline void swap(Semaphore && sem);
+        [[nodiscard]] inline int64_t count() const;
 		inline explicit operator int64_t () const;
 	};
 
 	Semaphore::Semaphore()
 	{
-		handle = sem_create(0);
-		if (handle == nullptr) [[unlikely]]
+        handle = sem_create(0);
+		if (UNLIKELY(handle == nullptr))
 			throw SemaphoreCreateException();
 	}
 
@@ -64,7 +62,7 @@ namespace co {
 	Semaphore::Semaphore(uint32_t x)
 	{
 		handle = sem_create(x);
-		if (handle == nullptr) [[unlikely]]
+		if (UNLIKELY(handle == nullptr))
 			throw SemaphoreCreateException();
 	}
 
@@ -73,35 +71,43 @@ namespace co {
 		if (handle == nullptr)
 			return;
 
-		sem_destroy(handle);
+		sem_destroy((void*)handle);
 		handle = nullptr;
 	}
 
 	void Semaphore::signal()
 	{
-		if (handle == nullptr) [[unlikely]]
+		if (UNLIKELY(handle == nullptr))
 			throw SemaphoreUnInitializationException();
 
-		sem_signal(handle);
+        handle->signal();
 	}
 
 	void Semaphore::wait()
 	{
-		if (handle == nullptr) [[unlikely]]
+		if (UNLIKELY(handle == nullptr))
 			throw SemaphoreUnInitializationException();
 
-		sem_wait(handle);
+        handle->wait();
 	}
 
 	bool Semaphore::try_wait()
 	{
-		if (handle == nullptr) [[unlikely]]
+		if (UNLIKELY(handle == nullptr))
 			throw SemaphoreUnInitializationException();
 
-		return sem_try_wait(handle);
+		return handle->try_wait();
 	}
+
+    /* 只有唤醒了等待队列的协程时，才触发callback */
+    void Semaphore::wait_then(const std::function<void(Co_t*)> & callback)
+    {
+        handle->wait_then(callback);
+    }
 
 	void Semaphore::swap(Semaphore && sem) { std::swap(handle, sem.handle); }
 
-	Semaphore::operator int64_t() const { return sem_get_count(handle); }
+    int64_t Semaphore::count() const { return handle->count(); }
+
+	Semaphore::operator int64_t() const { return handle->count(); }
 }

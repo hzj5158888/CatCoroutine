@@ -4,19 +4,21 @@
 
 #include "include/CoPrivate.h"
 
+using namespace co;
+
 #ifdef __SCHED_CFS__
 bool Co_t::operator > (const Co_t & oth) const 
 {  
-    sched.prefetch_v_runtime();
-    oth.sched.prefetch_v_runtime();
+    sched.prefetch();
+    oth.sched.prefetch();
     asm volatile("" ::: "memory");
     return sched.priority() > oth.sched.priority();
 }
 
 bool Co_t::operator < (const Co_t & oth) const 
 { 
-    sched.prefetch_v_runtime();
-    oth.sched.prefetch_v_runtime();
+    sched.prefetch();
+    oth.sched.prefetch();
     asm volatile("" ::: "memory");
     return sched.priority() < oth.sched.priority();
 }

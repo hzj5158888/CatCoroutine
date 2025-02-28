@@ -42,6 +42,11 @@ set(SYNC_PATH ${SRC}/sync)
 include_directories(${SYNC_PATH}/include)
 aux_source_directory(${SYNC_PATH} sync)
 
+# timer
+set(TIMER_PATH ${SRC}/timer)
+include_directories(${TIMER_PATH}/include)
+aux_source_directory(${TIMER_PATH} timer)
+
 # test
 set(TEST_PATH ${SRC}/test)
 include_directories(${TEST_PATH}/include)
@@ -56,10 +61,10 @@ enable_language(ASM)
 set(CMAKE_CXX_COMPILER /usr/bin/g++-13)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -Wall -Werror -fno-omit-frame-pointer")
-add_executable(Coroutine ${main} ${data_structure} ${allocator} ${context} ${utils} ${sched} ${sync} ${test})
+add_executable(Coroutine ${main} ${data_structure} ${allocator} ${context} ${utils} ${sched} ${sync} ${test} ${timer})
 
 # basic configuration
-add_compile_definitions(__CPU_CORE__=8)
+add_compile_definitions(__CPU_CORE__=1)
 add_compile_definitions(__CACHE_LINE__=64)
 
 # debug flag
@@ -82,7 +87,7 @@ add_compile_definitions(__SCHED_HEAP__)
 
 # stack allocate mode
 add_compile_definitions(__STACK_DYN__)
-#add_compile_definitions(__STACK_DYN_MMAP__)
+add_compile_definitions(__STACK_DYN_MMAP__)
 #add_compile_definitions(__STACK_STATIC__)
 
 # context

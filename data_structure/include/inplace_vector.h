@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <array>
 
+namespace co {
+
 template<typename T, std::size_t N>
 class inplace_vector
 {
@@ -41,3 +43,5 @@ public:
     T & at(int32_t idx) { return m_data.at(idx); }
     T & operator [] (int32_t idx) { return m_data[idx]; }
 };
+
+}

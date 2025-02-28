@@ -24,15 +24,9 @@ namespace co {
         using Tuple = callable_tuple<Fn, Args...>;
         Tuple func_args_tuple;
 
-        Invoker() = delete;
-
+        Invoker() = default;
         explicit Invoker(Fn && fn, Args &&... args) : func_args_tuple(std::forward<Fn>(fn), std::forward<Args>(args)...) {}
-
-        Invoker(Invoker && oth) noexcept
-		{
-			std::swap(func_args_tuple, oth.func_args_tuple);
-			std::swap(allocator, oth.allocator);
-		}
+        Invoker(Invoker && oth) noexcept { swap(oth); }
 
         template<std::size_t... Idx>
         std::invoke_result_t<Fn, Args...> invoke(std::index_sequence<Idx...>)

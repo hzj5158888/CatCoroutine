@@ -27,42 +27,42 @@
 
 #include "../../utils/include/spin_lock.h"
 
+namespace co {
     // Simple error collection for memory pool
-enum class EMemoryErrors
-{
-  CANNOT_CREATE_MEMORY_POOL,
-  CANNOT_CREATE_BLOCK,
-  OUT_OF_POOL,
-  EXCEEDS_MAX_SIZE,
-  CANNOT_CREATE_BLOCK_CHAIN
-};
+    enum class EMemoryErrors {
+        CANNOT_CREATE_MEMORY_POOL,
+        CANNOT_CREATE_BLOCK,
+        OUT_OF_POOL,
+        EXCEEDS_MAX_SIZE,
+        CANNOT_CREATE_BLOCK_CHAIN
+    };
 
     // Header for a single memory block
-struct SMemoryBlockHeader {
+    struct SMemoryBlockHeader {
         // Block data
-    size_t blockSize;
-    size_t offset;
+        size_t blockSize;
+        size_t offset;
 
         // Movement to other blocks
-    SMemoryBlockHeader* next;
-        SMemoryBlockHeader* prev;
+        SMemoryBlockHeader *next;
+        SMemoryBlockHeader *prev;
 
         // Garbage management data
         size_t numberOfAllocated;
         size_t numberOfDeleted;
-};
+    };
 
     // Header of a memory unit in the pool holding important metadata
     struct SMemoryUnitHeader {
         size_t length;
-        SMemoryBlockHeader* container;
+        SMemoryBlockHeader *container;
     };
 
     // Header for a scope in memory
     struct SMemoryScopeHeader {
         size_t scopeOffset;
-        SMemoryBlockHeader* firstScopeBlock;
-        SMemoryScopeHeader* prevScope;
+        SMemoryBlockHeader *firstScopeBlock;
+        SMemoryScopeHeader *prevScope;
     };
 
     class MemoryPool {
@@ -72,7 +72,9 @@ struct SMemoryBlockHeader {
          *
          * @param size_t block_size Defines the default stk_size of a block in the pool, by default uses MEMORY_POOL_DEFAULT_BLOCK_SIZE
          */
-        explicit MemoryPool(size_t block_size = MEMORY_POOL_DEFAULT_BLOCK_SIZE, bool single_block = false, bool use_mmap = false, int mmap_flag = 0);
+        explicit MemoryPool(size_t block_size = MEMORY_POOL_DEFAULT_BLOCK_SIZE, bool single_block = false,
+                            bool use_mmap = false, int mmap_flag = 0);
+
         // Destructor
         ~MemoryPool();
 
@@ -80,17 +82,17 @@ struct SMemoryBlockHeader {
         static_assert(((ALIGN - 1) & ALIGN) == 0);
 
         // Data about the memory pool blocks
-        SMemoryBlockHeader* firstBlock{};
-        SMemoryBlockHeader* currentBlock{};
+        SMemoryBlockHeader *firstBlock{};
+        SMemoryBlockHeader *currentBlock{};
         size_t defaultBlockSize{};
 
         // Data about memory scopes
-        SMemoryScopeHeader* currentScope{};
+        SMemoryScopeHeader *currentScope{};
 
         int mmap_flag{0};
         bool use_mmap{false};
         bool single_block{};
-		spin_lock m_lock{};
+        spin_lock m_lock{};
 
         /**
          * Create a new standalone memory block unattached to any memory pool
@@ -109,16 +111,16 @@ struct SMemoryBlockHeader {
          *
          * @returns void* Pointer to the newly allocateN space
          */
-        void* allocate_unsafe(size_t instances);
+        void *allocate_unsafe(size_t instances);
 
-		void* allocate(size_t instances);
+        void *allocate(size_t instances);
 
-		template<typename T, typename ... Args>
-		T * newElem(Args &&... args);
+        template<typename T, typename ... Args>
+        T *newElem(Args &&... args);
 
         // Templated allocation
         template<typename T>
-        T* allocateN(size_t instances);
+        T *allocateN(size_t instances);
 
         /**
          * Re-allocates memory in a pool
@@ -128,20 +130,20 @@ struct SMemoryBlockHeader {
          *
          * @returns void* Pointer to the newly allocateN space
          */
-        void* reallocate(void* unit_pointer_start, size_t new_size);
+        void *reallocate(void *unit_pointer_start, size_t new_size);
 
         // Templated re-allocation
         template<typename T>
-        T* reallocate(T* unit_pointer_start, size_t new_size);
+        T *reallocate(T *unit_pointer_start, size_t new_size);
 
         /**
          * Frees memory in a pool
          *
          * @param void* unit_pointer_start Pointer to the object to free
          */
-        void free_unsafe(void* unit_pointer_start);
+        void free_unsafe(void *unit_pointer_start);
 
-		void deallocate(void * unit_pointer_start);
+        void deallocate(void *unit_pointer_start);
 
         /**
          * Dump memory pool meta data of blocks unit to stream.
@@ -164,16 +166,17 @@ struct SMemoryBlockHeader {
          *
          */
         void endScope();
-	};
+    };
 
     template<typename T>
-    inline T* MemoryPool::allocateN(size_t instances) {
-        return reinterpret_cast<T*>(this->allocate_unsafe(instances * sizeof(T)));
+    inline T *MemoryPool::allocateN(size_t instances) {
+        return reinterpret_cast<T *>(this->allocate_unsafe(instances * sizeof(T)));
     }
 
     template<typename T>
-    inline T* MemoryPool::reallocate(T* unit_pointer_start, size_t instances) {
-        return reinterpret_cast<T*>(this->reallocate(reinterpret_cast<void*>(unit_pointer_start), instances * sizeof(T)));
+    inline T *MemoryPool::reallocate(T *unit_pointer_start, size_t instances) {
+        return reinterpret_cast<T *>(this->reallocate(reinterpret_cast<void *>(unit_pointer_start),
+                                                      instances * sizeof(T)));
     }
 
 
@@ -182,3 +185,4 @@ struct SMemoryBlockHeader {
 extern void* operator new(size_t size, MemoryPool* mp);
 extern void* operator new[](size_t stk_size, MemoryPool* mp);
  */
+}

@@ -4,6 +4,8 @@
 
 #pragma once
 
-class SchedEntity;
-class Scheduler;
-class SchedManager;
+namespace co {
+    class SchedEntity;
+    class Scheduler;
+    class SchedManager;
+}
