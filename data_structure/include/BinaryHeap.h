@@ -1,32 +1,32 @@
 #pragma once
 
-#include <utility>
+#include <cstdint>
 #include <vector>
 
 #include "../../utils/include/utils.h"
 
 namespace co {
     template<typename T, typename CMP = std::less<T>>
-    class QuaternaryHeap {
+    class BinaryHeap
+    {
     private:
-        /* x := [0, 3] */
-        constexpr inline int64_t get_son(int64_t fa, int x) { return ((fa - 1) << 2) + 2 + x; }
+        constexpr inline int64_t get_fa(int64_t son) { return son >> 1; }
 
-        constexpr inline int64_t get_fa(int64_t son) { return (son + 2) >> 2; }
+        constexpr inline int64_t get_son(int64_t u, int x) { return (u << 1) + x; }
 
         void pushup(int64_t u)
         {
             while (true)
             {
                 auto fa = get_fa(u);
-                //mm_prefetch(&m_data[fa], 1, 3);
-                if (LIKELY(fa) && !m_cmp(m_data[fa], m_data[u]))
+                if (UNLIKELY(!fa) || m_cmp(m_data[fa], m_data[u]))
                 {
+                    break;
+                } else {
                     std::swap(m_data[fa], m_data[u]);
                     u = fa;
-                } else {
-                    break;
                 }
+
             }
         }
 
@@ -36,24 +36,24 @@ namespace co {
             while (true)
             {
                 int64_t son = get_son(u, 0);
-                if (UNLIKELY(son > (cur_size >> 2)))
+                if (UNLIKELY(son > (cur_size >> 1)))
                     break;
 
-                int64_t min_son = son;
-                mm_prefetch(std::addressof(m_data[son]), 0, 3);
-                for (int64_t i = son + 1; i < son + 4; i++)
+                for (int i = 1; i < 2; i++)
                 {
-                    if (UNLIKELY(i > (cur_size >> 2)))
+                    int64_t cur_son = get_son(u, i);
+                    if (UNLIKELY(cur_son > (cur_size >> 1)))
                         break;
-                    if (m_cmp(m_data[i], m_data[min_son]))
-                        min_son = i;
+
+                    if (m_cmp(m_data[cur_son], m_data[son]))
+                        son = cur_son;
                 }
 
-                if (m_cmp(m_data[u], m_data[min_son]))
+                if (m_cmp(m_data[u], m_data[son]))
                     break;
 
-                std::swap(m_data[u], m_data[min_son]);
-                u = min_son;
+                std::swap(m_data[u], m_data[son]);
+                u = son;
             }
         }
 
@@ -69,10 +69,6 @@ namespace co {
         std::vector<T> m_data{1};
         CMP m_cmp{};
     public:
-        QuaternaryHeap() = default;
-
-        explicit QuaternaryHeap(int64_t size) { m_data.reserve(size + 1); }
-
         void pop()
         {
             DASSERT(!empty());
@@ -82,24 +78,10 @@ namespace co {
                 pushdown(1);
         }
 
-        T pop_back()
-        {
-            T ans = std::move(m_data.back());
-            m_data.pop_back();
-            return ans;
-        }
-
         template<typename F>
         void push(F && data)
         {
             m_data.push_back(std::forward<F>(data));
-            pushup(m_data.size() - 1);
-        }
-
-        template<class ... Args>
-        void emplace(Args &&... args)
-        {
-            m_data.emplace_back(std::forward<Args>(args)...);
             pushup(m_data.size() - 1);
         }
 
@@ -111,15 +93,15 @@ namespace co {
             pushdown(1);
         }
 
-        template<typename Iterator>
-        void push_all(Iterator begin, Iterator end)
+        template<typename F>
+        void push_all(const std::vector<F> & data)
         {
-            if (UNLIKELY(begin == end))
+            if (UNLIKELY(data.empty()))
                 return;
 
-            auto start_idx = m_data.size();
-            m_data.insert(m_data.end(), begin, end);
-            for (size_t i = start_idx; i < m_data.size(); i++)
+            auto start_idx = (int64_t) m_data.size();
+            m_data.insert(m_data.end(), data.begin(), data.end());
+            for (int64_t i = start_idx; i < (int64_t) (m_data.size() >> 1); i++)
                 pushup(i);
         }
 

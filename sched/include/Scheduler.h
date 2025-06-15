@@ -11,21 +11,17 @@
 #include <exception>
 #include <vector>
 
-#ifdef __SCHED_RB_TREE__
-#include <set>
-#endif
 #include "spin_lock.h"
 #include "../../utils/include/spin_lock_sleep.h"
 #include "../../utils/include/sem_utils.h"
 #include "../../include/CoPrivate.h"
-#ifdef __SCHED_HEAP__
 #include "../../data_structure/include/QuaternaryHeap.h"
-#endif
+#include "../../data_structure/include/BinaryHeap.h"
 #ifdef __SCHED_FIFO__
 #include "../../data_structure/include/QueueLockFree.h"
 #include "../../allocator/include/MemPoolAllocator.h"
 #endif
-#include "../../data_structure/include/RingBufferLockFree.h"
+#include "../../data_structure/include/RingQueue.h"
 
 namespace co {
     class ApplyRunningCoException : public std::exception
@@ -35,6 +31,11 @@ namespace co {
     };
 
 #ifdef __SCHED_CFS__
+    struct sort_wrap
+    {
+        uint64_t priority{};
+        Co_t * co{};
+    };
 
     struct CoPtrLessCmp
     {
@@ -42,7 +43,7 @@ namespace co {
         {
             if (a && b)
             {
-                return a->sched.v_runtime < b->sched.v_runtime;
+                return a->sched.priority() < b->sched.priority();
             } else if (a == nullptr)
             {
                 return false;
@@ -52,14 +53,15 @@ namespace co {
         }
     };
 
-    struct CoPtrGreaterCmp
+    struct SortWrapLessCmp
     {
-        bool operator()(const Co_t *a, const Co_t *b) const
+        bool operator() (const sort_wrap & a, const sort_wrap & b) const
         {
-            return *a > *b;
+            /* a.priority - b.priority */
+            /* a.priority & b.priority < 2^63 */
+            return (((a.priority - b.priority) >> (sizeof(uint64_t) - 1)) & 1);
         }
     };
-
 #endif
 
     enum {
@@ -73,35 +75,21 @@ namespace co {
     public:
         int this_thread_id{};
         //std::atomic<uint64_t> sum_v_runtime{};
-        std::atomic<size_t> ready_count{};
+        size_t ready_count{};
         counting_semaphore sem_ready{};
         Context sched_ctx{};
 
 #ifdef __SCHED_CFS__
         constexpr static auto MAX_BACKOFF = 12;
-
         using spin_lock_t = spin_lock_sleep;
-
         /* lockness data structure */
         alignas(__CACHE_LINE__) spin_lock_t sched_lock{};
-#ifdef __SCHED_RB_TREE__
-        std::multiset<Co_t *, CoPtrLessCmp> ready{};
-#elif __SCHED_HEAP__
-        QuaternaryHeap<Co_t *, CoPtrLessCmp> ready{};
-        QuaternaryHeap<Co_t *, CoPtrLessCmp> ready_fixed{};
+        QuaternaryHeap<sort_wrap, SortWrapLessCmp> ready{};
+        QuaternaryHeap<sort_wrap, SortWrapLessCmp> ready_fixed{};
 #else
         static_assert(false);
 #endif
 
-#elif __SCHED_FIFO__
-        QueueLockFree<Co_t*, PmrAllocatorLockFree<uint8_t>> ready{};
-        QueueLockFree<Co_t*, PmrAllocatorLockFree<uint8_t>> ready_fixed{};
-        /* even => ready */
-        /* odd => ready_fixed */
-        uint8_t cur_pick{};
-#else
-        static_assert(false);
-#endif
         std::atomic<uint64_t> min_v_runtime{};
         int latest_arg{};
         Co_t * running_co{};
@@ -120,7 +108,7 @@ namespace co {
 
         void pull_from_buffer(std::vector<Co_t *> &);
 
-        void push_all_to_ready(const std::vector<Co_t *> &, const std::vector<Co_t *> &, bool);
+        void push_all_to_ready(const std::vector<sort_wrap> &, const std::vector<sort_wrap> &, bool);
 
         void push_to_ready(Co_t *co, bool);
 
@@ -132,7 +120,13 @@ namespace co {
 
         void apply_ready_eager(Co_t *co, bool from_buffer = false);
 
-        void apply_ready_all(const std::vector<Co_t *> &co_vec, bool from_buffer = false);
+        void apply_ready_all(
+                const std::vector<Co_t *> &co_vec,
+                std::unique_lock<spin_lock_t> & locker,
+                bool from_buffer = false,
+                bool enable_lock = true,
+                bool unlock_exit = true
+        );
 
         void remove_from_scheduler(Co_t *co);
 
@@ -190,6 +184,6 @@ namespace co {
 
         void stealing_work(int, std::vector<Co_t *> &);
 
-        void push_scheduler(Scheduler *s, int idx);
+        void add_scheduler(Scheduler *s, int idx);
     };
 }

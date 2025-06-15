@@ -12,7 +12,7 @@
 #include "../../include/CoCtx.h"
 #include "../../include/CoPrivate.h"
 #include "../../sched/include/Scheduler.h"
-#include "../../data_structure/include/RingBufferLockFree.h"
+#include "../../data_structure/include/RingBufferLock.h"
 #include "Semaphore.h"
 #include "utils.h"
 #include "RingBuffer.h"
@@ -32,8 +32,7 @@ namespace co {
 	{
 	private:
         //RingBufferLockFree<T> buffer{SIZE};
-        RingBuffer<T, SIZE> buffer{};
-        spin_lock_sleep m_lock{};
+        RingBufferLock<T, SIZE> buffer{};
         std::atomic<bool> is_close{false};
 		Semaphore sender{}, receiver{SIZE};
         Semaphore full{}, empty{SIZE};
@@ -51,18 +50,17 @@ namespace co {
 
 #ifdef __STACK_DYN__
             bool is_exec{};
-			receiver.wait_then([&x, &is_exec](Co_t * receiver_co)
+            auto callback = [&x, &is_exec](Co_t * receiver_co)
             {
-                *(reinterpret_cast<T*>(receiver_co->chan_receiver)) = std::forward<V>(x);
-                receiver_co->chan_has_value = true;
+                *(reinterpret_cast<T*>(receiver_co->recv_buffer)) = std::forward<V>(x);
+                receiver_co->buffer_has_value = true;
                 is_exec = true;
-            });
+            };
+			receiver.wait_then([&callback](Co_t * receiver_co) { callback(receiver_co); });
             if (!is_exec)
             {
                 empty.wait();
-                m_lock.lock();
                 assert(buffer.push(std::forward<V>(x)));
-                m_lock.unlock();
                 full.signal();
             }
 #else
@@ -72,6 +70,48 @@ namespace co {
 			sender.signal();
 		}
 
+        template<class V>
+        bool push_for(V && x, std::chrono::microseconds duration)
+        {
+            if (UNLIKELY(is_close.load(std::memory_order_relaxed)))
+                throw ChannelClosedException();
+
+#ifdef __STACK_DYN__
+            auto stage_1 = std::chrono::microseconds(co_ctx::clock.rdus());
+
+            bool is_exec{};
+            auto callback = [&x, &is_exec](Co_t * receiver_co)
+            {
+                *(reinterpret_cast<T*>(receiver_co->recv_buffer)) = std::forward<V>(x);
+                receiver_co->buffer_has_value = true;
+                is_exec = true;
+            };
+            bool timeout = receiver.wait_for_then(duration, [&callback](Co_t * receiver_co)
+            {
+                callback(receiver_co);
+            });
+            if (timeout)
+                return false;
+
+            auto stage_2 = std::chrono::microseconds(co_ctx::clock.rdus());
+            auto stage_1_cost = stage_2 - stage_1;
+            if (!is_exec)
+            {
+                auto success = empty.wait_for(duration - stage_1_cost);
+                if (!success)
+                    return false;
+
+                assert(buffer.push(std::forward<V>(x)));
+                full.signal();
+            }
+#else
+            receiver.wait();
+            buffer.push(std::forward<V>(x));
+#endif
+            sender.signal();
+            return true;
+        }
+
         template<class ... Args>
         void emplace(Args ... args)
         {
@@ -80,19 +120,18 @@ namespace co {
 
 #ifdef __STACK_DYN__
             bool is_exec{};
-            receiver.wait_then([&is_exec, &args...](Co_t * wakeup_co)
+            auto callback = [&is_exec, &args...](Co_t * wakeup_co)
             {
-                auto obj_ptr = reinterpret_cast<T*>(wakeup_co->chan_receiver);
+                auto obj_ptr = reinterpret_cast<T*>(wakeup_co->recv_buffer);
                 *obj_ptr = T{std::forward<Args>(args)...};
-                wakeup_co->chan_has_value = true;
+                wakeup_co->buffer_has_value = true;
                 is_exec = true;
-            });
+            };
+            receiver.wait_then([&callback](Co_t * wakeup_co) { callback(wakeup_co); });
             if (!is_exec)
             {
                 empty.wait();
-                m_lock.lock();
                 assert(buffer.emplace(std::forward<Args>(args)...));
-                m_lock.unlock();
                 full.signal();
             }
 #else
@@ -109,17 +148,15 @@ namespace co {
 
 #ifdef __STACK_DYN__
             auto cur_co = co_ctx::loc->scheduler->running_co;
-            cur_co->chan_receiver = std::addressof(ans);
-            cur_co->chan_has_value = false;
+            cur_co->recv_buffer = std::addressof(ans);
+            cur_co->buffer_has_value = false;
 
 			sender.wait();
             receiver.signal();
-            if (!cur_co->chan_has_value)
+            if (!cur_co->buffer_has_value)
             {
                 full.wait();
-                m_lock.lock();
                 assert(buffer.pop(ans));
-                m_lock.unlock();
                 empty.signal();
             }
 #else
@@ -128,6 +165,42 @@ namespace co {
             receiver.signal();
 #endif
 		}
+
+        bool pull_for(T & ans, std::chrono::microseconds duration)
+        {
+            if (UNLIKELY(is_close.load(std::memory_order_relaxed) && sender.count() == 0))
+                throw ChannelClosedException();
+
+#ifdef __STACK_DYN__
+            auto cur_co = co_ctx::loc->scheduler->running_co;
+            cur_co->recv_buffer = std::addressof(ans);
+            cur_co->buffer_has_value = false;
+
+            auto stage_1 = std::chrono::microseconds(co_ctx::clock.rdus());
+            bool timeout = sender.wait_for(duration);
+            if (timeout)
+                return false;
+
+            receiver.signal();
+
+            auto stage_2 = std::chrono::microseconds(co_ctx::clock.rdus());
+            auto stage_1_cost = stage_2 - stage_1;
+            if (!cur_co->buffer_has_value)
+            {
+                auto success = full.wait_for(duration - stage_1_cost);
+                if (!success)
+                    return false;
+
+                assert(buffer.pop(ans));
+                empty.signal();
+            }
+#else
+            sender.wait_for(duration);
+            ans = buffer.pop(ans);
+            receiver.signal();
+#endif
+            return true;
+        }
 
 		inline void close() { is_close = true; }
         [[nodiscard]] inline int32_t size() const { return static_cast<int64_t>(sender); }

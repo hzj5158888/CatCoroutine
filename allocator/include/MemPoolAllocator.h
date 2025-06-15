@@ -27,7 +27,7 @@ namespace co {
 
         void deallocate(T * ptr, size_type size)
         {
-            co_ctx::g_alloc->oth_pool.deallocate(ptr);
+            co_ctx::g_alloc->oth_pool.deallocate(ptr, size);
         }
     };
 }

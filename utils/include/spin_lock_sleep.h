@@ -77,16 +77,12 @@ namespace co {
     private:
         bool m_lock{false};
     public:
-        std::chrono::nanoseconds kMinYieldingSleep = std::chrono::microseconds(500);
-
         spin_lock_sleep() = default;
-
-        spin_lock_sleep(std::chrono::nanoseconds kMinYieldingSleep) : kMinYieldingSleep(kMinYieldingSleep) {}
 
         void lock() noexcept
         {
-            auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
-            SpinSleeper sleeper{kMinYieldingSleep};
+            auto lock = atomization(m_lock);
+            SpinSleeper sleeper{};
             for (;;) {
                 // Optimistically assume the lock is free on the first try
                 if (!lock->exchange(true, std::memory_order_acquire))
@@ -99,7 +95,7 @@ namespace co {
         }
 
         bool try_lock() noexcept {
-            auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
+            auto lock = atomization(m_lock);
             // First do a relaxed load to check if lock is free in order to prevent
             // unnecessary cache misses if someone does while(!try_lock())
             return !lock->load(std::memory_order_relaxed) &&
@@ -107,19 +103,19 @@ namespace co {
         }
 
         void unlock() noexcept {
-            auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
+            auto lock = atomization(m_lock);
             lock->store(false, std::memory_order_release);
         }
 
         bool try_lock_for(int32_t max_spin) {
-            auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
-            SpinSleeper sleeper{kMinYieldingSleep};
+            auto lock = atomization(m_lock);
+            SpinSleeper sleeper{};
             while (max_spin > 0) {
-                // Optimistically assume the m_lock is free on the first try
+                // Optimistically assume the removal_lock is free on the first try
                 if (!lock->exchange(true, std::memory_order_acquire))
                     return true;
 
-                // Wait for m_lock to be released without generating cache misses
+                // Wait for removal_lock to be released without generating cache misses
                 while (max_spin > 0 && lock->load(std::memory_order_relaxed))
                     max_spin -= sleeper.wait_for(max_spin);
             }
@@ -128,14 +124,14 @@ namespace co {
         }
 
         bool try_lock_for_backoff(uint8_t max_backoff = SpinSleeper::MaxBackOff) {
-            auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
-            SpinSleeper sleeper{kMinYieldingSleep};
+            auto lock = atomization(m_lock);
+            SpinSleeper sleeper{};
             while (max_backoff > 0) {
-                // Optimistically assume the m_lock is free on the first try
+                // Optimistically assume the removal_lock is free on the first try
                 if (!lock->exchange(true, std::memory_order_acquire))
                     return true;
 
-                // Wait for m_lock to be released without generating cache misses
+                // Wait for removal_lock to be released without generating cache misses
                 while (max_backoff > 0 && lock->load(std::memory_order_relaxed)) {
                     sleeper.wait();
                     max_backoff--;
@@ -182,7 +178,7 @@ namespace co {
             void lock() noexcept
             {
                 auto value = get_value();
-                SpinSleeper sleeper{w_lock.kMinYieldingSleep};
+                SpinSleeper sleeper{};
                 while (true)
                 {
                     auto res = atomic_fetch_modify(*value, [](size_t cur_value) -> size_t
@@ -229,7 +225,7 @@ namespace co {
             bool try_lock_for(int32_t max_spin)
             {
                 auto value = get_value();
-                SpinSleeper sleeper{w_lock.kMinYieldingSleep};
+                SpinSleeper sleeper{};
                 while (max_spin > 0)
                 {
                     auto res = atomic_fetch_modify(*value, [](size_t cur_value) -> size_t
@@ -252,7 +248,7 @@ namespace co {
             bool try_lock_for_backoff(uint8_t max_backoff = SpinSleeper::MaxBackOff)
             {
                 auto value = get_value();
-                SpinSleeper sleeper{w_lock.kMinYieldingSleep};
+                SpinSleeper sleeper{};
                 while (max_backoff > 0)
                 {
                     auto res = atomic_fetch_modify(*value, [](size_t cur_value) -> size_t
@@ -295,7 +291,7 @@ namespace co {
             void lock() noexcept
             {
                 auto value = get_value();
-                SpinSleeper sleeper{w_lock.kMinYieldingSleep};
+                SpinSleeper sleeper{};
 
                 /* increment writer */
                 (*value)++;
@@ -331,7 +327,7 @@ namespace co {
             bool try_lock_backoff(uint8_t max_backoff = SpinSleeper::MaxBackOff) noexcept
             {
                 auto value = get_value();
-                SpinSleeper sleeper{w_lock.kMinYieldingSleep};
+                SpinSleeper sleeper{};
 
                 bool w_lock_res{};
                 while (true)

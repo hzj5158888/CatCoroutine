@@ -26,4 +26,10 @@ namespace co {
         while (UNLIKELY(!atomic.compare_exchange_weak(cur, (ans = fn(cref)), order, std::memory_order_relaxed)));
         return ans;
     }
+
+    template<typename T>
+    inline std::atomic<T> * atomization(T & x)
+    {
+        return reinterpret_cast<std::atomic<T>*>(std::addressof(x));
+    }
 }

@@ -33,6 +33,8 @@ namespace co {
 	class Semaphore
 	{
 	private:
+        using callback_t = std::function<void(Co_t*)>;
+
         Sem_t * handle{};
 	public:
 		inline Semaphore();
@@ -43,8 +45,10 @@ namespace co {
 
 		inline void signal();
 		inline void wait();
+        inline void wait_then(const callback_t &);
+        inline bool wait_for(std::chrono::microseconds duration);
+        inline bool wait_for_then(std::chrono::microseconds duration, const callback_t & callback);
 		inline bool try_wait();
-        inline void wait_then(const std::function<void(Co_t*)> &);
 		inline void swap(Semaphore && sem);
         [[nodiscard]] inline int64_t count() const;
 		inline explicit operator int64_t () const;
@@ -91,6 +95,32 @@ namespace co {
         handle->wait();
 	}
 
+    /* 只有唤醒了等待队列的协程时，才触发callback */
+    void Semaphore::wait_then(const callback_t & callback)
+    {
+        if (UNLIKELY(handle == nullptr))
+            throw SemaphoreUnInitializationException();
+
+        handle->wait_then(callback);
+    }
+
+    bool Semaphore::wait_for(std::chrono::microseconds duration)
+    {
+        if (UNLIKELY(handle == nullptr))
+            throw SemaphoreUnInitializationException();
+
+        return handle->wait_for(duration);
+    }
+
+    /* 只有唤醒了等待队列的协程时，才触发callback */
+    bool Semaphore::wait_for_then(std::chrono::microseconds duration, const callback_t & callback)
+    {
+        if (UNLIKELY(handle == nullptr))
+            throw SemaphoreUnInitializationException();
+
+        return handle->wait_for_then(duration, callback);
+    }
+
 	bool Semaphore::try_wait()
 	{
 		if (UNLIKELY(handle == nullptr))
@@ -98,12 +128,6 @@ namespace co {
 
 		return handle->try_wait();
 	}
-
-    /* 只有唤醒了等待队列的协程时，才触发callback */
-    void Semaphore::wait_then(const std::function<void(Co_t*)> & callback)
-    {
-        handle->wait_then(callback);
-    }
 
 	void Semaphore::swap(Semaphore && sem) { std::swap(handle, sem.handle); }
 

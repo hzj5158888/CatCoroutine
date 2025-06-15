@@ -15,8 +15,10 @@ namespace co {
         std::pmr::deque<T> m_q{&pool};
         spin_lock m_lock{};
 
-        T wait_and_pop() {
-            while (true) {
+        T wait_and_pop()
+        {
+            while (true)
+            {
                 if (m_q.empty())
                     continue;
 
@@ -31,7 +33,8 @@ namespace co {
             }
         }
 
-        std::optional<T> try_pop() {
+        std::optional<T> try_pop()
+        {
             std::lock_guard lock(m_lock);
             if (m_q.empty())
                 return std::nullopt;
@@ -42,7 +45,8 @@ namespace co {
         }
 
         template<typename V>
-        void push(V data) {
+        void push(V data)
+        {
             std::lock_guard lock(m_lock);
             m_q.push_back(std::forward<V>(data));
         }

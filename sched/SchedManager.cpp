@@ -21,7 +21,8 @@ namespace co {
             assert(false);
 
         /* back to origin thread */
-        if (co->sched.occupy_thread != -1) {
+        if (co->sched.occupy_thread != -1)
+        {
             if (flag == APPLY_NORMAL)
                 schedulers.at(co->sched.occupy_thread)->apply_ready(co);
             else if (flag == APPLY_EAGER)
@@ -68,14 +69,14 @@ namespace co {
     void SchedManager::wakeup_await_co_all(Co_t *await_callee) {
         DASSERT(await_callee != nullptr);
         std::lock_guard lock(await_callee->await_caller_lock);
-        auto caller_q = &await_callee->await_caller;
-        while (!caller_q->empty()) {
-            auto cur = caller_q->front();
-            caller_q->pop();
-
-            cur->await_callee = nullptr;
-            apply(cur);
+        auto & caller_q = await_callee->await_caller;
+        for (auto co : caller_q)
+        {
+            co->await_callee = nullptr;
+            apply(co);
         }
+        caller_q.clear();
+        caller_q.shrink_to_fit();
     }
 
     void SchedManager::stealing_work(int thread_from, std::vector<Co_t *> &res) {
@@ -99,6 +100,7 @@ namespace co {
 #ifdef __STACK_STATIC__
         return std::vector<Co_t*>{};
 #endif
+
         std::vector<Co_t *> res{};
         for (size_t i = 0; i < schedulers.size(); i++) {
             if ((int) i == thread_from)
@@ -114,7 +116,7 @@ namespace co {
         return res;
     }
 
-    void SchedManager::push_scheduler(Scheduler *s, int idx) {
+    void SchedManager::add_scheduler(Scheduler *s, int idx) {
         std::lock_guard lock(w_lock);
         schedulers.at(idx) = s;
         scheduler_count++;

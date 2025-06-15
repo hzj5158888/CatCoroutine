@@ -31,6 +31,7 @@ set(context ${context} ${CONTEXT_PATH}/swap_context_impl.S)
 set(UTILS_PATH ${SRC}/utils)
 include_directories(${UTILS_PATH}/include)
 aux_source_directory(${UTILS_PATH} utils)
+set(utils ${utils} ${UTILS_PATH}/include/utils.S)
 
 # sched
 set(SCHED_PATH ${SRC}/sched)
@@ -47,6 +48,11 @@ set(TIMER_PATH ${SRC}/timer)
 include_directories(${TIMER_PATH}/include)
 aux_source_directory(${TIMER_PATH} timer)
 
+# io
+set(IO_PATH ${SRC}/io)
+include_directories(${IO_PATH}/include)
+aux_source_directory(${IO_PATH} io)
+
 # test
 set(TEST_PATH ${SRC}/test)
 include_directories(${TEST_PATH}/include)
@@ -61,14 +67,17 @@ enable_language(ASM)
 set(CMAKE_CXX_COMPILER /usr/bin/g++-13)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O2 -Wall -Werror -fno-omit-frame-pointer")
-add_executable(Coroutine ${main} ${data_structure} ${allocator} ${context} ${utils} ${sched} ${sync} ${test} ${timer})
+add_executable(Coroutine ${main} ${data_structure} ${allocator} ${context} ${utils} ${sched} ${sync} ${test} ${timer} ${io})
+# pthread boost
+target_link_libraries(Coroutine pthread ${Boost_LIBRARIES})
 
 # basic configuration
-add_compile_definitions(__CPU_CORE__=1)
+add_compile_definitions(__CPU_CORE__=6)
 add_compile_definitions(__CACHE_LINE__=64)
 
 # debug flag
 #add_compile_definitions(__DEBUG__)
+#add_compile_definitions(__DEBUG_SEM_TRACE__)
 #add_compile_definitions(__DEBUG_SCHED__)
 #add_compile_definitions(__DEBUG_SCHED_RUN__)
 #add_compile_definitions(__DEBUG_SCHED_READY__)
@@ -81,8 +90,6 @@ add_compile_definitions(__CACHE_LINE__=64)
 
 # scheduler data structure
 add_compile_definitions(__SCHED_CFS__)
-#add_compile_definitions(__SCHED_RB_TREE__)
-add_compile_definitions(__SCHED_HEAP__)
 #add_compile_definitions(__SCHED_FIFO__)
 
 # stack allocate mode
@@ -91,9 +98,6 @@ add_compile_definitions(__STACK_DYN_MMAP__)
 #add_compile_definitions(__STACK_STATIC__)
 
 # context
-#add_compile_definitions(__CONTEXT_STACK_PROTECTOR__)
+add_compile_definitions(__CONTEXT_STACK_PROTECTOR__)
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fstack-protector-all")
 #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-stack-protector")
-
-# pthread
-target_link_libraries(Coroutine pthread ${Boost_LIBRARIES})

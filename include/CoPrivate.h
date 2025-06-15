@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <queue>
 #include <atomic>
+#include <stack>
 
 #include "../context/include/Context.h"
 #include "../include/Coroutine.h"
@@ -14,7 +15,7 @@
 #include "../../sched/include/CfsSchedEntity.h"
 
 namespace co {
-    enum CO_STATUS {
+    enum CoStatus {
         CO_NEW = 1,
         CO_READY,
         CO_RUNNING,
@@ -23,13 +24,14 @@ namespace co {
         CO_DEAD
     };
 
-    enum CO_WAKEUP_REASON {
+    enum CoWakeupReasons {
         CO_WAKEUP_NONE = 0,
         CO_WAKEUP_TIMER
     };
 
-    struct Co_t {
-        uint32_t id{co::INVALID_CO_ID};
+    struct Co_t
+    {
+        bool is_main_co{};
         std::atomic<uint8_t> status{CO_NEW};
         spin_lock status_lock{};
         uint16_t wakeup_reason{};
@@ -42,13 +44,10 @@ namespace co {
 #endif
         Scheduler * scheduler{};
 
-        /* timer waiting_task */
-        std::shared_ptr<TimerTask> waiting_task{};
-
         /* 用于通道唤醒后接收数据
          */
-        void * chan_receiver{};
-        bool chan_has_value{};
+        void * recv_buffer{};
+        bool buffer_has_value{};
 
         // 上下文
         Context ctx{};
@@ -64,9 +63,11 @@ namespace co {
         // await
         Co_t *await_callee{}; // await 谁
         spin_lock await_caller_lock{};
-        std::queue<Co_t *> await_caller{}; // 谁 await
-#ifdef __DEBUG__
+        std::vector<Co_t *> await_caller{}; // 谁 await
+#ifdef __DEBUG_SEM_TRACE__
         void * sem_ptr{};
+        TimerTaskPtr cur_task{};
+        std::vector<std::string> sem_wakeup_reason{};
 #endif
 
         Co_t() = default;
@@ -74,11 +75,7 @@ namespace co {
         Co_t(Co_t &&oth) = delete;
         ~Co_t() = default;
 
-#ifdef __SCHED_CFS__
         bool operator>(const Co_t &oth) const;
         bool operator<(const Co_t &oth) const;
-#endif
-
-        void operator delete(void *ptr) noexcept = delete;
     };
 }

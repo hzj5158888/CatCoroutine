@@ -17,46 +17,32 @@ namespace co {
     void Scheduler::push_to_ready(Co_t * co, bool enable_lock)
     {
         std::unique_lock<spin_lock_t> lock;
-#if __SCHED_RB_TREE__
-        if (enable_lock)
-            m_lock = std::unique_lock(sched_lock);
-
-        ready.insert(co);
-#elif __SCHED_HEAP__
         if (enable_lock)
             lock = std::unique_lock(sched_lock);
 
         if (co->sched.can_migration)
-            ready.push(co);
+            ready.push(sort_wrap{co->sched.priority(), co});
         else
-            ready_fixed.push(co);
+            ready_fixed.push(sort_wrap{co->sched.priority(), co});
 
 #ifdef __DEBUG_SCHED__
-        co_ctx::m_lock.lock();
+        co_ctx::removal_lock.lock();
         co_ctx::co_vec.insert(co);
-        co_ctx::m_lock.unlock();
+        co_ctx::removal_lock.unlock();
 #endif
 
-#elif __SCHED_FIFO__
-        if (co->sched.can_migration)
-            ready.push(co);
-        else
-            ready_fixed.push(co);
-#endif
+        ready_count++;
     }
 
-    void Scheduler::push_all_to_ready(const std::vector<Co_t*> & co_vec, const std::vector<Co_t*> & fixed_co, bool enable_lock)
+    void Scheduler::push_all_to_ready(const std::vector<sort_wrap> & co_vec, const std::vector<sort_wrap> & fixed_co, bool enable_lock)
     {
-#ifdef __SCHED_HEAP__
         std::unique_lock<spin_lock_t> lock;
         if (enable_lock)
             lock = std::unique_lock(sched_lock);
 
-        ready.push_all(co_vec);
-        ready_fixed.push_all(fixed_co);
-#else
-        static_assert(false);
-#endif
+        ready.push_all(co_vec.begin(), co_vec.end());
+        ready_fixed.push_all(fixed_co.begin(), fixed_co.end());
+        ready_count += co_vec.size() + fixed_co.size();
     }
 
     void Scheduler::pull_half_co(std::vector<Co_t*> & ans)
@@ -64,12 +50,11 @@ namespace co {
         if (ready.empty())
             return;
 
-#ifdef __SCHED_CFS__
         std::lock_guard lock(sched_lock);
         /* double check */
         if (ready.empty())
             return;
-#endif
+
         int trans_size = 0;
         int pull_count = ready.size() / 2;
         for (; trans_size < pull_count; trans_size++)
@@ -77,29 +62,18 @@ namespace co {
             if (!sem_ready.try_wait())
                 break;
 
-#ifdef __SCHED_CFS__
-#ifdef __SCHED_HEAP__
-            ans.push_back(ready.top());
-            ready.pop();
-#else
-            static_assert(false);
-#endif
-#elif __SCHED_FIFO__
-            auto co_opt = ready.try_pop();
-            if (!co_opt.has_value())
-                break;
+            ans.push_back(ready.pop_back().co);
 
-            ans.push_back(co_opt.value());
-#endif
 #ifdef __DEBUG_SCHED__
-            co_ctx::m_lock.lock();
+            co_ctx::removal_lock.lock();
             co_ctx::co_vec.erase(ans.back());
-            co_ctx::m_lock.unlock();
+            co_ctx::removal_lock.unlock();
 #endif
             remove_from_scheduler(ans.back());
             ans.back()->sched.occupy_thread = -1;
         }
-        ready_count.fetch_sub(trans_size);
+
+        ready_count -= trans_size;
     }
 
     void Scheduler::pull_from_buffer(std::vector<Co_t*> & ans)
@@ -128,8 +102,6 @@ namespace co {
         {
             push_to_ready(co, false);
             sched_lock.unlock();
-            //sum_v_runtime += cur_sum_v_runtime;
-            ready_count.fetch_add(1, std::memory_order_acq_rel);
             sem_ready.signal();
         } else {
             apply_ready_lazy(co);
@@ -140,9 +112,10 @@ namespace co {
     {
         if (UNLIKELY(!buffer.push(co)))
         {
+            auto cur_sched_lock = std::unique_lock(sched_lock, std::defer_lock);
             auto buf_co = pull_from_buffer();
             buf_co.push_back(co);
-            apply_ready_all(buf_co, true);
+            apply_ready_all(buf_co, cur_sched_lock, true);
         }
         sem_ready.signal();
     }
@@ -152,15 +125,12 @@ namespace co {
 #ifdef __SCHED_CFS__
         if (co->sched.v_runtime == 0)
             co->sched.v_runtime = min_v_runtime.load(std::memory_order_relaxed);
-
-        //sum_v_runtime += co->sched.v_runtime;
 #endif
 
 #ifdef __DEBUG__
         if (!co->sched.can_migration)
             DASSERT(co->sched.occupy_thread == -1 || co->sched.occupy_thread == this_thread_id);
 #endif
-
         /* handle wakeup_reason */
         switch (co->wakeup_reason)
         {
@@ -181,14 +151,17 @@ namespace co {
     {
         uint64_t cur_sum_v_runtime{};
         get_ready_to_push(co, cur_sum_v_runtime);
-        //sum_v_runtime += cur_sum_v_runtime;
         push_to_ready(co, true);
-        ready_count.fetch_add(1, std::memory_order_acq_rel);
         if (!from_buffer)
             sem_ready.signal();
     }
 
-    void Scheduler::apply_ready_all(const std::vector<Co_t *> & co_vec, bool from_buffer)
+    void Scheduler::apply_ready_all(
+            const std::vector<Co_t *> & co_vec,
+            std::unique_lock<spin_lock_t> & locker,
+            bool from_buffer,
+            bool enable_lock,
+            bool unlock_exit)
     {
         if (co_vec.empty())
             return;
@@ -199,94 +172,101 @@ namespace co {
         for (auto co : co_vec)
             get_ready_to_push(co, cur_sum_v_runtime);
 
-#ifdef __SCHED_CFS__
-        //sum_v_runtime.fetch_add(cur_sum_v_runtime, std::memory_order_acq_rel);
-#endif
-
-#ifdef __SCHED_CFS__
-        sched_lock.lock();
-#endif
-        std::vector<Co_t*> fixed_co{};
-        std::vector<Co_t*> unfixed_co{};
+        std::vector<sort_wrap> fixed_co{};
+        std::vector<sort_wrap> unfixed_co{};
         fixed_co.reserve(co_vec.size() / 2);
         unfixed_co.reserve(co_vec.size() / 2);
         for (auto co : co_vec)
         {
             if (co->sched.can_migration)
-                unfixed_co.push_back(co);
+                unfixed_co.push_back(sort_wrap{co->sched.priority(), co});
             else
-                fixed_co.push_back(co);
+                fixed_co.push_back(sort_wrap{co->sched.priority(), co});
         }
 
-        push_all_to_ready(unfixed_co, fixed_co, false);
-#ifdef __SCHED_CFS__
-        sched_lock.unlock();
-#endif
-        ready_count.fetch_add(co_vec.size());
+        if (enable_lock)
+        {
+            locker.lock();
+            push_all_to_ready(unfixed_co, fixed_co, false);
+            if (unlock_exit)
+                locker.unlock();
+        } else {
+            push_all_to_ready(unfixed_co, fixed_co, false);
+        }
+
         if (!from_buffer)
             sem_ready.signal(co_vec.size());
     }
 
     void Scheduler::remove_from_scheduler(Co_t * co)
     {
-#ifdef __SCHED_CFS__
-        //sum_v_runtime -= co->sched.v_runtime;
-#endif
         co->scheduler = nullptr;
     }
 
     Co_t * Scheduler::pickup_ready()
     {
+        std::unique_lock cur_sched_lock = std::unique_lock(sched_lock, std::defer_lock);
         if (!sem_ready.try_wait())
         {
             auto res = co_ctx::manager->stealing_work(this_thread_id);
-            apply_ready_all(res, false);
-            sem_ready.wait();
+            apply_ready_all(res, cur_sched_lock, false, true, false);
+            if (UNLIKELY(!sem_ready.try_wait()))
+            {
+                if (cur_sched_lock.owns_lock())
+                    cur_sched_lock.unlock();
+
+                sem_ready.wait();
+            } else {
+                goto end_pull_from_buffer;
+            }
         }
 
-        /* block: pull from buffer */
+        /* pull coroutines from buffer */
         {
+            if (atomization(ready_count)->load(std::memory_order_relaxed) == 0)
+            {
+                cur_sched_lock.lock();
+                if (ready_count > 0)
+                    goto end_pull_from_buffer;
+                else
+                    cur_sched_lock.unlock();
+            }
+
             std::vector<Co_t*> res{};
-            while (ready_count.load(std::memory_order_relaxed) == 0)
+            while (atomization(ready_count)->load(std::memory_order_relaxed) == 0)
             {
                 pull_from_buffer(res);
                 if (res.empty())
                     continue;
 
-                apply_ready_all(res, true);
+                apply_ready_all(res, cur_sched_lock, true, true, false);
                 break;
             }
         }
 
-        ready_count.fetch_sub(1);
-
+        /* label: end_pull_from_buffer */
+        end_pull_from_buffer:
 #ifdef __DEBUG__
-        sched_lock.lock();
+        if (!cur_sched_lock.owns_lock())
+            cur_sched_lock.lock();
+
         DASSERT(!(ready.empty() && ready_fixed.empty()));
-        sched_lock.unlock();
 #endif
 
 #ifdef __SCHED_CFS__
-#ifdef __SCHED_RB_TREE__
-        sched_lock.m_lock();
-        auto iter = ready.begin();
-        auto ans = *iter;
-        ready.erase(iter);
-        if (!ready.empty()) [[likely]]
-            min_v_runtime = (*ready.begin())->sched.v_runtime;
+        if (!cur_sched_lock.owns_lock())
+            cur_sched_lock.lock();
 
-        sched_lock.unlock();
-#elif __SCHED_HEAP__
-        sched_lock.lock();
+        ready_count--;
 
         Co_t * ans{};
         Co_t * ans_list[2]{nullptr, nullptr};
         if (!ready.empty())
-            ans_list[0] = ready.top();
+            ans_list[0] = ready.top().co;
         if (!ready_fixed.empty())
-            ans_list[1] = ready_fixed.top();
+            ans_list[1] = ready_fixed.top().co;
 
-        DASSERT(ans_list[0] || ans_list[1]);
+        assert(UNLIKELY(ans_list[0] || ans_list[1]));
 
         if (CoPtrLessCmp{}(ans_list[0], ans_list[1]))
         {
@@ -300,41 +280,30 @@ namespace co {
         auto up_v_runtime_fn = [this](uint64_t cur_v_time) -> uint64_t
         {
             if (!ready.empty())
-                cur_v_time = std::min(cur_v_time, ready.top()->sched.v_runtime);
+            {
+                auto top_v_time = ready.top().priority;
+                cur_v_time = cur_v_time > 0 ? std::min(cur_v_time, top_v_time) : top_v_time;
+            }
             if (!ready_fixed.empty())
-                cur_v_time = std::min(cur_v_time, ready_fixed.top()->sched.v_runtime);
+            {
+                auto top_v_time = ready_fixed.top().priority;
+                cur_v_time = cur_v_time > 0 ? std::min(cur_v_time, top_v_time) : top_v_time;
+            }
 
             return cur_v_time;
         };
         atomic_fetch_modify(min_v_runtime, up_v_runtime_fn, std::memory_order_acq_rel);
 
-        sched_lock.unlock();
+        cur_sched_lock.unlock();
 #else
-        static_assert(false);
-#endif
-#elif __SCHED_FIFO__
-        std::optional<Co_t*> ans_opt{};
-        while (!ans_opt.has_value())
-        {
-            cur_pick++;
-
-            if (!(cur_pick & 1))
-                ans_opt = ready.try_pop();
-            if (!ans_opt.has_value())
-                ans_opt = ready_fixed.try_pop();
-        }
-
-        DASSERT(ans_opt.has_value());
-        auto ans = ans_opt.value();
-    #else
         static_assert(false);
 #endif
 
         DASSERT(ans->status == CO_READY);
 #ifdef __DEBUG_SCHED_READY__
-        co_ctx::m_lock.lock();
+        co_ctx::removal_lock.cur_sched_lock();
         co_ctx::co_vec.erase(ans);
-        co_ctx::m_lock.unlock();
+        co_ctx::removal_lock.unlock();
 #endif
         return ans;
     }
@@ -343,10 +312,9 @@ namespace co {
     {
         assert(UNLIKELY(co->status == CO_READY));
 
-        co->status_lock.lock();
+        /* READY => RUNNING 不需要对status_lock加锁 */
         co->stk_active_lock.lock();
-        co->sched.start_exec();
-        if (LIKELY(co->id != co::MAIN_CO_ID)) // 设置 非main coroutine 栈帧
+        if (LIKELY(!co->is_main_co)) // 设置 非main coroutine 栈帧
         {
 #ifdef __STACK_STATIC__
             /* 设置stack分配器 */
@@ -367,15 +335,14 @@ namespace co {
         }
 
 #ifdef __DEBUG_SCHED_RUN__
-        co_ctx::m_lock.lock();
+        co_ctx::removal_lock.lock();
         DASSERT(co_ctx::running_co.count(co) == 0);
         co_ctx::running_co.insert(co);
-        co_ctx::m_lock.unlock();
+        co_ctx::removal_lock.unlock();
 #endif
         running_co = co;
         co->status = CO_RUNNING;
         co->sched.start_exec();
-        co->status_lock.unlock();
         latest_arg = swap_context(&sched_ctx, &co->ctx);
     }
 
@@ -389,11 +356,9 @@ namespace co {
         running_co->sched.end_exec();
 #ifdef __SCHED_CFS__
         /* update running time */
-        //sum_v_runtime.fetch_sub(running_co->sched.v_runtime, std::memory_order_acq_rel);
         running_co->sched.up_v_runtime();
-        //sum_v_runtime.fetch_add(running_co->sched.v_runtime, std::memory_order_acq_rel);
 #endif
-        /* unlock before exit */
+        /* whether unlock when exit */
         if (unlock_exit)
             running_co->status_lock.unlock();
 
@@ -403,10 +368,7 @@ namespace co {
     uint64_t Scheduler::get_load()
     {
         uint64_t load{};
-#ifdef __SCHED_CFS__
-       // load += sum_v_runtime.load(std::memory_order_relaxed);
-#endif
-        load += ready_count.load(std::memory_order_relaxed);
+        load += atomization(ready_count)->load(std::memory_order_relaxed);
         return load;
     }
 
@@ -430,7 +392,7 @@ namespace co {
 
         auto caller = interrupt(CO_WAITING, false);
         await_callee->await_caller_lock.lock();
-        await_callee->await_caller.push(caller);
+        await_callee->await_caller.push_back(caller);
         await_callee->await_caller_lock.unlock();
         caller->await_callee = await_callee;
         /* release caller */
@@ -456,7 +418,7 @@ namespace co {
             stk_pool->free_stk(&dead_co->ctx);
         }
 #elif __STACK_STATIC__
-        if (dead_co->id != co::MAIN_CO_ID) [[likely]]
+        if (!dead_co->is_main_co) [[likely]]
         {
             auto stk_pool = dead_co->co_ctx.static_stk_pool;
             stk_pool->destroy_stack(dead_co);
@@ -464,9 +426,9 @@ namespace co {
 #endif
 
 #ifdef __DEBUG_SCHED_READY__
-        co_ctx::m_lock.lock();
+        co_ctx::removal_lock.lock();
         co_ctx::co_vec.erase(dead_co);
-        co_ctx::m_lock.unlock();
+        co_ctx::removal_lock.unlock();
 #endif
 
         dead_co->status = CO_DEAD;
@@ -475,31 +437,25 @@ namespace co {
 
     void Scheduler::coroutine_sleep()
     {
-        if (sleep_args.sleep_duration == microseconds(0) && sleep_args.sleep_until == microseconds(0))
+        if (sleep_args.sleep_duration == Timer::InvalidTime && sleep_args.sleep_until == Timer::InvalidTime)
             return;
 
         auto cur_co = interrupt(CO_WAITING, true);
         remove_from_scheduler(cur_co);
-        auto wakeup_callback = [cur_co]()
+        auto wakeup_callback = [cur_co](bool is_timeout)
         {
+            if (!is_timeout)
+                return;
+
             DEXPR(std::cout << "wakeup_callback: " << cur_co << std::endl;)
             cur_co->wakeup_reason = CO_WAKEUP_TIMER;
             co_ctx::manager->apply(cur_co);
         };
 
-        if (cur_co->waiting_task)
-        {
-            if (sleep_args.sleep_duration != microseconds(0))
-                cur_co->waiting_task->reset(sleep_args.sleep_duration, true);
-            else if (sleep_args.sleep_until != microseconds(0))
-                cur_co->waiting_task->reset_until(sleep_args.sleep_until);
-        } else {
-            if (sleep_args.sleep_duration != microseconds(0))
-                cur_co->waiting_task = co_ctx::loc->timer->add_task(sleep_args.sleep_duration, wakeup_callback);
-            else if (sleep_args.sleep_until != microseconds(0))
-                cur_co->waiting_task = co_ctx::loc->timer->add_task_until(sleep_args.sleep_until, wakeup_callback);
-        }
-
+        if (sleep_args.sleep_duration != Timer::InvalidTime)
+            co_ctx::loc->timer->add_task(sleep_args.sleep_duration, wakeup_callback);
+        else if (sleep_args.sleep_until != Timer::InvalidTime)
+            co_ctx::loc->timer->add_task_until(sleep_args.sleep_until, wakeup_callback);
 
         sleep_args = SleepArgs{};
     };
@@ -539,9 +495,9 @@ namespace co {
         co->ctx.set_stk_dyn_size();
 #endif
 #ifdef __DEBUG_SCHED_RUN__
-        co_ctx::m_lock.lock();
+        co_ctx::removal_lock.lock();
         co_ctx::running_co.erase(co);
-        co_ctx::m_lock.unlock();
+        co_ctx::removal_lock.unlock();
 #endif
         /* handle wakeup_reason */
         switch (co->wakeup_reason)

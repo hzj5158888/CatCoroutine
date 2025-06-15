@@ -23,6 +23,7 @@ namespace co {
         constexpr static size_t total_block = (BITS_COUNT + block_bits - 1) / block_bits;
         /* block bits is power of 2 */
         static_assert((block_bits & (block_bits - 1)) == 0);
+        static_assert(total_block > 0);
 
         struct data_pos {
             size_t block_idx;
@@ -162,6 +163,28 @@ namespace co {
         long long change_first_expect(bool expected, bool value) {
             return change_first_expect_impl(expected, value);
         }
+
+        [[nodiscard]] size_t count_one() const
+        {
+            size_t ans{};
+            for (int64_t i = 0; i < (int64_t)total_block - 1; i++)
+                ans += __builtin_popcount(m_block[i].load(std::memory_order_relaxed));
+
+            int bit_leave = BITS_COUNT - (total_block - 1) * block_bits;
+            int byte_idx = bit_leave / 8;
+            auto last_block = m_block[total_block - 1].load(std::memory_order_relaxed);
+            auto byte_block = reinterpret_cast<uint8_t*>(&last_block);
+            for (int i = 0; i < byte_idx; i++)
+                ans += __builtin_popcount(byte_block[i]);
+
+            bit_leave -= byte_idx * 8;
+            for (int i = 0; i < bit_leave; i++)
+                ans += (byte_block[byte_idx] >> (7 - i)) & 1;
+
+            return ans;
+        }
+
+        [[nodiscard]] size_t count_zero() const { return BITS_COUNT - count_one(); }
     };
 
     template<>

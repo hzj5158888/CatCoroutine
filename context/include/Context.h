@@ -53,6 +53,7 @@ namespace co {
 #ifdef  __x86_64__
             constexpr static auto REG_COUNT = 12;
             constexpr static auto X87CW = 0;
+            constexpr static auto MXCSR = 1;
             constexpr static auto SI = 7;
             constexpr static auto DI = 8;
             constexpr static auto BP = 10;
@@ -75,10 +76,10 @@ namespace co {
         bool first_full_save{true};
 #endif
 
-        [[nodiscard]] uint64_t *get_stk() const { return reinterpret_cast<uint64_t *>(jmp_reg.bp); }
+        [[nodiscard]] size_t * get_stk() const { return reinterpret_cast<size_t *>(jmp_reg.bp); }
 
         [[nodiscard]] std::size_t stk_frame_size() const {
-            return (std::size_t) get_stk()[JMP_REG::BP] - (std::size_t) jmp_reg.sp;
+            return get_stk()[JMP_REG::BP] - jmp_reg.sp;
         }
 
 #ifdef __STACK_STATIC__
@@ -105,7 +106,8 @@ namespace co {
         /* bottom地址更新前使用, 仅当 独享模式 使用 */
         void set_stk_dyn_size() { stk_dyn_size = (std::size_t) stk_dyn_real_bottom - jmp_reg.sp; }
 
-        void set_stack_dyn(uint8_t *stk) {
+        void set_stack_dyn(uint8_t *stk)
+        {
             if (stk_dyn_real_bottom == nullptr) // first set
             {
                 jmp_reg.bp = reinterpret_cast<uint64_t>(stk);
@@ -125,7 +127,13 @@ namespace co {
 
     extern "C" int swap_context_impl(uint64_t *from, uint64_t *to, int ret = CONTEXT_RESTORE);
 
-    int swap_context(Context *from, Context *to, int ret = CONTEXT_RESTORE);
+    inline int swap_context(Context *from, Context *to, int ret = CONTEXT_RESTORE)
+    {
+        if (LIKELY(from != nullptr))
+            return swap_context_impl(std::addressof(from->jmp_reg.sp), std::addressof(to->jmp_reg.sp), ret);
+        else
+            return swap_context_impl((uint64_t *) std::addressof(from), std::addressof(to->jmp_reg.sp), ret);
+    }
 
     void make_context_wrap
             (

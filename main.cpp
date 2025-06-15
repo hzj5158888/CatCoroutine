@@ -7,13 +7,15 @@
 #include <mutex>
 #include <thread>
 #include <vector>
+#include <numbers>
+#include <numeric>
 
 #include "./include/Coroutine.h"
 #include "spin_lock.h"
 #include "test/include/test.h"
 #include "../data_structure/include/BitSetLockFree.h"
 #include "../data_structure/include/QueueLockFree.h"
-#include "Context.h"
+#include "../data_structure/include/RingQueue.h"
 
 /*
 void list_free_test()
@@ -190,6 +192,45 @@ void bitset_test()
 	std::cout << "bitset test success" << std::endl;
 }
 
+void ring_queue_test()
+{
+    constexpr auto N = 114514;
+
+    struct X
+    {
+        int x;
+        X() = default;
+        explicit X(int x) : x(x) {}
+    };
+
+    co::RingQueue<X> q{};
+    for (int i = 0; i < N; i++)
+    {
+        q.push(X{i + 1});
+        X t{};
+        q.pop(t);
+        assert(t.x == i + 1);
+
+        for (int j = 0; j < N; j++)
+            q.push(X{j});
+
+        std::vector<int> res{};
+        while (!q.empty())
+        {
+            X x{};
+            q.pop(x);
+            res.push_back(x.x);
+        }
+
+        assert(res.size() == N);
+
+        for (int j = 0; j < N; j++)
+        {
+            assert(j == res[j]);
+        }
+    }
+}
+
 int main()
 {
 	std::cout << "main entry" << std::endl;
@@ -197,6 +238,7 @@ int main()
 	//list_free_test();
     //queue_lock_free_test();
 	//bitset_test();
+    //ring_queue_test();
 
 	co::init();
     std::cout << "coroutine initilization compelete" << std::endl;

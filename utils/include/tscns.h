@@ -72,7 +72,8 @@ namespace co {
             saveParam(tsc, calulated_ns, ns, new_ns_per_tsc);
         }
 
-        static inline uint64_t rdtsc() {
+        static inline uint64_t rdtsc()
+        {
 #ifdef _MSC_VER
             return __rdtsc();
 #elif defined(__i386__) || defined(__x86_64__) || defined(__amd64__)

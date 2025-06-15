@@ -28,6 +28,8 @@
 #endif
 
 namespace co {
+    constexpr static uint64_t INF = 0x3f3f3f3f3f3f3f3f;
+
     template<typename T>
     constexpr bool has_virtual_function() {
         struct tmp : T {
@@ -108,7 +110,7 @@ namespace co {
 
     inline constexpr std::pmr::pool_options get_default_pmr_opt() {
         return std::pmr::pool_options{
-                48,
+                32,
                 1024 * 1024 * 4
         };
     }
@@ -117,14 +119,6 @@ namespace co {
     inline constexpr bool is_pow_of_2(T x) {
         static_assert(std::is_unsigned_v<T>);
         return (x & (x - 1)) == 0;
-    }
-
-    inline uint32_t xor_shift_32(uint32_t state) {
-        /* Algorithm "xor" from p. 4 of Marsaglia, "Xorshift RNGs" */
-        state ^= state << 13;
-        state ^= state >> 17;
-        state ^= state << 5;
-        return state;
     }
 
     inline void spin_wait(int32_t total_spin) {
@@ -148,5 +142,18 @@ namespace co {
         }
 
         return -1;
+    }
+
+    #define mm_prefetch(ptr, rw, locality) \
+        __builtin_prefetch(ptr, rw, locality); \
+        asm volatile ("" ::: "memory");
+
+    extern "C" size_t mm_get_x87cw();
+
+    extern "C" size_t mm_get_mxcsr();
+
+    inline bool cfs_nice_in_range(int nice)
+    {
+        return nice >= -20 && nice <= 19;
     }
 }

@@ -13,7 +13,7 @@ namespace co {
         ctx->stk_dyn_alloc = this;
         ctx->stk_dyn_capacity = co::MAX_STACK_SIZE;
 #ifdef __MEM_PMR__
-        co_ctx->stk_dyn_mem = dyn_stk_pool.allocate(STACK_SIZE, 64);
+        ctx->stk_dyn_mem = dyn_stk_pool.allocate(STACK_SIZE, 64);
 #else
         ctx->stk_dyn_mem = dyn_stk_pool.allocate(STACK_SIZE);
 #endif
@@ -23,7 +23,7 @@ namespace co {
 
     void DynStackPool::free_stk(Context *ctx) {
 #ifdef __MEM_PMR__
-        dyn_stk_pool.deallocate(co_ctx->stk_dyn_mem, STACK_SIZE);
+        dyn_stk_pool.deallocate(ctx->stk_dyn_mem, STACK_SIZE);
 #else
         dyn_stk_pool.deallocate(ctx->stk_dyn_mem);
 #endif

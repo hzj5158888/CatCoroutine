@@ -20,10 +20,13 @@ namespace co {
     {
     public:
         constexpr static int nice_offset = 20;
+        /* ~128us */
+        constexpr static int precision = 17;
 
         int nice{}, prev_nice{};
         uint64_t v_runtime{};
         uint64_t real_runtime{};
+        uint64_t real_runtime_ns{};
         uint64_t start_exec_timestamp{};
         uint64_t end_exec_timestamp{};
 
@@ -31,7 +34,8 @@ namespace co {
 
         void up_real_runtime()
         {
-            real_runtime += end_exec_timestamp - start_exec_timestamp;
+            real_runtime_ns += end_exec_timestamp - start_exec_timestamp;
+            real_runtime = (real_runtime_ns >> precision) << precision;
             end_exec_timestamp = start_exec_timestamp = 0;
         }
 
@@ -39,17 +43,17 @@ namespace co {
         {
             //auto now = std::chrono::system_clock::now();
             //start_exec_timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
-            start_exec_timestamp = co_ctx::loc->clock.rdns();
+            start_exec_timestamp = co_ctx::clock.rdns();
         }
 
         void end_exec() override
         {
             //auto now = std::chrono::system_clock::now();
             //end_exec_timestamp = std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
-            end_exec_timestamp = co_ctx::loc->clock.rdns();
+            end_exec_timestamp = co_ctx::clock.rdns();
         }
 
-        void prefetch() const { __builtin_prefetch(this, 0, 2); }
+        void prefetch() const { __builtin_prefetch(std::addressof(v_runtime), 0, 3); }
 
         void up_nice(int cur_nice)
         {

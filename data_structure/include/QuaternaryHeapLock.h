@@ -12,9 +12,13 @@ namespace co {
     class alignas(__CACHE_LINE__) QuaternaryHeapLock
     {
     private:
+        using atomic_size_t = std::atomic<size_t>;
+
         QuaternaryHeap<T, CMP> m_heap{};
-        std::atomic<size_t> m_size{};
+        size_t m_size{};
         spin_lock_sleep m_lock{};
+
+        atomic_size_t * get_size() { return reinterpret_cast<atomic_size_t*>(&m_size); }
     public:
         QuaternaryHeapLock() = default;
 
@@ -30,8 +34,10 @@ namespace co {
             return ans;
         }
 
-        T wait_and_pop() {
-            while (true) {
+        T wait_and_pop()
+        {
+            while (true)
+            {
                 if (empty())
                     continue;
 
@@ -47,13 +53,22 @@ namespace co {
         }
 
         template<typename F>
-        void push(F data) {
+        void push(F && data)
+        {
             std::lock_guard lock(m_lock);
             m_heap.push(std::forward<F>(data));
             m_size++;
         }
 
-        [[nodiscard]] int size() const { return m_size.load(std::memory_order_relaxed); }
+        template<class ... Args>
+        void emplace(Args &&... args)
+        {
+            std::lock_guard lock(m_lock);
+            m_heap.emplace(std::forward<Args>(args)...);
+            m_size++;
+        }
+
+        [[nodiscard]] int64_t size() { return (int64_t) get_size()->load(std::memory_order_relaxed); }
 
         [[nodiscard]] bool empty() { return size() == 0; }
     };

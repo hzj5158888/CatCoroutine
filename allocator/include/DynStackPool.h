@@ -31,12 +31,12 @@ namespace co {
         };
 #elif __STACK_DYN_MMAP__
         MemoryPool dyn_stk_pool
-                {
-                        POOL_BLOCK_COUNT * STACK_SIZE,
-                        false,
-                        true,
-                        MAP_GROWSDOWN | MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK
-                };
+        {
+            POOL_BLOCK_COUNT * STACK_SIZE,
+            false,
+            true,
+            MAP_GROWSDOWN | MAP_PRIVATE | MAP_ANONYMOUS | MAP_STACK
+        };
 #else
         MemoryPool dyn_stk_pool{POOL_BLOCK_COUNT * STACK_SIZE, false};
 #endif

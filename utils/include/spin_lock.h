@@ -15,11 +15,11 @@ namespace co {
         void lock() noexcept {
             auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
             for (;;) {
-                // Optimistically assume the m_lock is free on the first try
+                // Optimistically assume the removal_lock is free on the first try
                 if (!lock->exchange(true, std::memory_order_acquire))
                     return;
 
-                // Wait for m_lock to be released without generating cache misses
+                // Wait for removal_lock to be released without generating cache misses
                 while (lock->load(std::memory_order_relaxed)) {
                     // Issue X86 PAUSE or ARM YIELD instruction to reduce contention between
                     // hyper-threads
@@ -31,11 +31,11 @@ namespace co {
         bool try_lock_for(int32_t max_spin) {
             auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
             while (max_spin > 0) {
-                // Optimistically assume the m_lock is free on the first try
+                // Optimistically assume the removal_lock is free on the first try
                 if (!lock->exchange(true, std::memory_order_acquire))
                     return true;
 
-                // Wait for m_lock to be released without generating cache misses
+                // Wait for removal_lock to be released without generating cache misses
                 while (max_spin > 0 && lock->load(std::memory_order_relaxed))
                     max_spin--;
             }
@@ -45,7 +45,7 @@ namespace co {
 
         bool try_lock() noexcept {
             auto lock = reinterpret_cast<std::atomic<bool> *>(&m_lock);
-            // First do a relaxed load to check if m_lock is free in order to prevent
+            // First do a relaxed load to check if removal_lock is free in order to prevent
             // unnecessary cache misses if someone does while(!try_lock())
             return !lock->load(std::memory_order_relaxed) &&
                    !lock->exchange(true, std::memory_order_acquire);

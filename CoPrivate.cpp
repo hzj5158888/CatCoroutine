@@ -6,7 +6,6 @@
 
 using namespace co;
 
-#ifdef __SCHED_CFS__
 bool Co_t::operator > (const Co_t & oth) const 
 {  
     sched.prefetch();
@@ -22,4 +21,3 @@ bool Co_t::operator < (const Co_t & oth) const
     asm volatile("" ::: "memory");
     return sched.priority() < oth.sched.priority();
 }
-#endif
